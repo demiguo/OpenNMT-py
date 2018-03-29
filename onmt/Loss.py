@@ -121,7 +121,7 @@ class LossComputeBase(nn.Module):
 
         for shard in shards(shard_state, shard_size):
             loss, stats = self._compute_loss(batch, **shard)
-            loss.div(normalization).backward()
+            loss.div(normalization).backward(retain_graph=True)
             batch_stats.update(stats)
 
         return batch_stats
@@ -140,8 +140,8 @@ class LossComputeBase(nn.Module):
         non_padding = target.ne(self.padding_idx)
         num_correct = pred.eq(target) \
                           .masked_select(non_padding) \
-                          .sum()
-        return onmt.Statistics(loss[0], non_padding.sum(), num_correct)
+                          .long().sum()
+        return onmt.Statistics(loss.cpu().numpy(), non_padding.long().sum().cpu().numpy(), num_correct.cpu().numpy())
 
     def _bottle(self, v):
         return v.view(-1, v.size(2))
@@ -209,12 +209,11 @@ class NMTLossCompute(LossComputeBase):
         return loss, stats
 
 
-def filter_shard_state(state, requires_grad=True, volatile=False):
+def filter_shard_state(state, requires_grad=True):
     for k, v in state.items():
         if v is not None:
             if isinstance(v, Variable) and v.requires_grad:
-                v = Variable(v.data, requires_grad=requires_grad,
-                             volatile=volatile)
+                v = Variable(v.data, requires_grad=requires_grad)
             yield k, v
 
 
@@ -235,7 +234,7 @@ def shards(state, shard_size, eval=False):
         After the last shard, this function does back-propagation.
     """
     if eval:
-        yield filter_shard_state(state, False, True)
+        yield filter_shard_state(state, False)
     else:
         # non_none: the subdict of the state dictionary where the values
         # are not None.
