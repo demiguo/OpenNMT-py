@@ -317,7 +317,7 @@ class RNNDecoderBase(nn.Module):
         coverage = None
         if "coverage" in attns:
             coverage = attns["coverage"][-1].unsqueeze(0)
-        state.update_state(decoder_final, final_output, coverage)
+        state.update_state(decoder_final, final_output.unsqueeze(0), coverage)
 
         # Concatenates sequence of tensors along a new dimension.
         if isinstance(decoder_outputs, tuple) or isinstance(decoder_outputs, list):
@@ -405,7 +405,7 @@ class StdRNNDecoder(RNNDecoderBase):
             memory_bank.transpose(0, 1),
             memory_lengths=memory_lengths
         )
-        attns["std"] = [p_attn]
+        attns["std"] = p_attn
 
         # Calculate the context gate.
         if self.context_gate is not None:
@@ -465,7 +465,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
         of arguments and return values.
         """
         # Additional args check.
-        input_feed = state.input_feed
+        input_feed = state.input_feed.squeeze(0)
         input_feed_batch, _ = input_feed.size()
         tgt_len, tgt_batch, _ = tgt.size()
         aeq(tgt_batch, input_feed_batch)
@@ -646,7 +646,7 @@ class RNNDecoderState(DecoderState):
         batch_size = self.hidden[0].size(1)
         h_size = (batch_size, hidden_size)
         self.input_feed = Variable(self.hidden[0].data.new(*h_size).zero_(),
-                                   requires_grad=False)
+                                   requires_grad=False).unsqueeze(0)
 
     @property
     def _all(self):
