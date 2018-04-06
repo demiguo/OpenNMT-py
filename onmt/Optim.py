@@ -123,6 +123,14 @@ class Optim(object):
 
         if self.max_grad_norm:
             clip_grad_norm(self.params, self.max_grad_norm)
+
+        for param in self.params:
+            if param.grad is not None:
+                param.grad[param.grad == float("Inf")] = 0
+                param.grad[param.grad == float("-Inf")] = 0
+                if (param.grad!=param.grad).any():
+                    print ('Nans detected in gradients')
+                    param.grad[param.grad!=param.grad] = 0
         self.optimizer.step()
 
     def update_learning_rate(self, ppl, epoch):
