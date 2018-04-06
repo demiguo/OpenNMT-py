@@ -395,6 +395,9 @@ def build_optim(model, checkpoint):
 
 
 def main():
+    # Print options
+    for k in opt.__dict__:
+        print ('%s: %s'%(k, opt.__dict__[k]))
     # Load checkpoint if we resume from a previous training.
     if opt.train_from:
         print('Loading checkpoint from %s' % opt.train_from)

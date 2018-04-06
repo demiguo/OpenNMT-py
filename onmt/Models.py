@@ -188,6 +188,39 @@ class RNNEncoder(EncoderBase):
             outs = bottle_hidden(self.bridge[0], hidden)
         return outs
 
+class InferenceNetwork(nn.Module):
+    def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
+                 rnn_type, src_layers, tgt_layers, rnn_size, dropout):
+        super(InferenceNetwork, self).__init__()
+        if inference_network_type == 'embedding_only':
+            self.src_encoder = src_embeddings
+            self.tgt_encoder = tgt_embeddings
+        elif inference_network_type == 'brnn':
+            self.src_encoder = RNNEncoder(rnn_type, True, src_layers, rnn_size,
+                                          dropout, src_embeddings, False) 
+            self.tgt_encoder = RNNEncoder(rnn_type, True, tgt_layers, rnn_size,
+                                          dropout, tgt_embeddings, False) 
+        elif inference_network_type == 'rnn':
+            self.src_encoder = RNNEncoder(rnn_type, False, src_layers, rnn_size,
+                                          dropout, src_embeddings, False) 
+            self.tgt_encoder = RNNEncoder(rnn_type, False, tgt_layers, rnn_size,
+                                          dropout, tgt_embeddings, False) 
+
+        self.W = torch.nn.Linear(rnn_size, rnn_size)
+
+    def forward(self, src, tgt, src_lengths=None):
+        src_final, src_memory_bank = self.src_encoder(src, src_lengths)
+        src_length, batch_size, rnn_size = src_memory_bank.size()
+        tgt_final, tgt_memory_bank = self.tgt_encoder(tgt)
+        src_memory_bank = src_memory_bank.transpose(0,1) # batch_size, src_length, rnn_size
+        src_memory_bank = src_memory_bank.contiguous().view(-1, rnn_size) # batch_size*src_length, rnn_size
+        src_memory_bank = self.W(src_memory_bank) \
+                              .view(batch_size, src_length, rnn_size)
+        src_memory_bank = src_memory_bank.transpose(1,2) # batch_size, rnn_size, src_length
+        tgt_memory_bank = tgt_memory_bank.transpose(0,1) # batch_size, tgt_length, rnn_size
+        scores = torch.bmm(tgt_memory_bank, src_memory_bank) \
+                      .exp()# batch_size, tgt_length, src_length
+        return scores
 
 class RNNDecoderBase(nn.Module):
     """
@@ -282,7 +315,8 @@ class RNNDecoderBase(nn.Module):
             self._copy = True
         self._reuse_copy_attn = reuse_copy_attn
 
-    def forward(self, tgt, memory_bank, state, memory_lengths=None):
+    def forward(self, tgt, memory_bank, state, memory_lengths=None,
+                q_scores_sample=None):
         """
         Args:
             tgt (`LongTensor`): sequences of padded tokens
@@ -310,7 +344,8 @@ class RNNDecoderBase(nn.Module):
 
         # Run the forward pass of the RNN.
         decoder_final, decoder_outputs, attns = self._run_forward_pass(
-            tgt, memory_bank, state, memory_lengths=memory_lengths)
+            tgt, memory_bank, state, memory_lengths=memory_lengths,
+            q_scores_sample=q_scores_sample)
 
         # Update the state with the result.
         final_output = decoder_outputs[-1]
@@ -459,7 +494,8 @@ class InputFeedRNNDecoder(RNNDecoderBase):
           G --> H
     """
 
-    def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None):
+    def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None,
+                          q_scores_sample=None):
         """
         See StdRNNDecoder._run_forward_pass() for description
         of arguments and return values.
@@ -493,10 +529,15 @@ class InputFeedRNNDecoder(RNNDecoderBase):
             decoder_input = torch.cat([emb_t, input_feed], 1)
 
             rnn_output, hidden = self.rnn(decoder_input, hidden)
+            if q_scores_sample is not None:
+                q_sample = q_scores_sample[i]
+            else:
+                q_sample = None
             decoder_output, p_attn = self.attn(
                 rnn_output,
                 memory_bank.transpose(0, 1),
-                memory_lengths=memory_lengths)
+                memory_lengths=memory_lengths,
+                q_scores_sample=q_sample)
             if self.context_gate is not None:
                 # TODO: context gate should be employed
                 # instead of second RNN transform.
@@ -554,11 +595,12 @@ class NMTModel(nn.Module):
       decoder (:obj:`RNNDecoderBase`): a decoder object
       multi<gpu (bool): setup for multigpu support
     """
-    def __init__(self, encoder, decoder, multigpu=False):
+    def __init__(self, encoder, decoder, inference_network, multigpu=False):
         self.multigpu = multigpu
         super(NMTModel, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
+        self.inference_network = inference_network
 
     def forward(self, src, tgt, lengths, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
@@ -582,15 +624,22 @@ class NMTModel(nn.Module):
                  * final decoder state
         """
         tgt = tgt[:-1]  # exclude last target from inputs
+        tgt_length, batch_size, rnn_size = tgt.size()
 
         enc_final, memory_bank = self.encoder(src, lengths)
         enc_state = \
             self.decoder.init_decoder_state(src, memory_bank, enc_final)
+        # inference network q(z|x,y)
+        q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
+        q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
+        m = torch.distributions.Dirichlet(q_scores.cpu())
+        q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
         decoder_outputs, dec_state, attns = \
             self.decoder(tgt, memory_bank,
                          enc_state if dec_state is None
                          else dec_state,
-                         memory_lengths=lengths)
+                         memory_lengths=lengths,
+                         q_scores_sample=q_scores_sample)
         if self.multigpu:
             # Not yet supported on multi-gpu
             dec_state = None

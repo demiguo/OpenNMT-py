@@ -125,7 +125,7 @@ class GlobalAttention(nn.Module):
 
             return self.v(wquh.view(-1, dim)).view(tgt_batch, tgt_len, src_len)
 
-    def forward(self, input, memory_bank, memory_lengths=None, coverage=None):
+    def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):
         """
 
         Args:
@@ -146,6 +146,8 @@ class GlobalAttention(nn.Module):
         if input.dim() == 2:
             one_step = True
             input = input.unsqueeze(1)
+            if q_scores_sample is not None:
+                q_scores_sample = q_scores_sample.unsqueeze(1)
         else:
             one_step = False
 
@@ -178,7 +180,10 @@ class GlobalAttention(nn.Module):
 
         # each context vector c_t is the weighted average
         # over all the source hidden states
-        c = torch.bmm(align_vectors, memory_bank)
+        if q_scores_sample is None:
+            c = torch.bmm(align_vectors, memory_bank)
+        else:
+            c = torch.bmm(q_scores_sample, memory_bank)
 
         # concatenate
         concat_c = torch.cat([c, input], 2).view(batch*targetL, dim*2)

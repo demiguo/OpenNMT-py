@@ -10,7 +10,7 @@ import onmt.io
 import onmt.Models
 import onmt.modules
 from onmt.Models import NMTModel, MeanEncoder, RNNEncoder, \
-                        StdRNNDecoder, InputFeedRNNDecoder
+                        StdRNNDecoder, InputFeedRNNDecoder, InferenceNetwork
 from onmt.modules import Embeddings, ImageEncoder, CopyGenerator, \
                          TransformerEncoder, TransformerDecoder, \
                          CNNEncoder, CNNDecoder, AudioEncoder
@@ -18,7 +18,8 @@ from onmt.Utils import use_gpu
 from torch.nn.init import xavier_uniform
 
 
-def make_embeddings(opt, word_dict, feature_dicts, for_encoder=True):
+def make_embeddings(opt, word_dict, feature_dicts, for_encoder=True,
+                    for_inference_network=False):
     """
     Make an Embeddings instance.
     Args:
@@ -28,9 +29,15 @@ def make_embeddings(opt, word_dict, feature_dicts, for_encoder=True):
         for_encoder(bool): make Embeddings for encoder or decoder?
     """
     if for_encoder:
-        embedding_dim = opt.src_word_vec_size
+        if not for_inference_network:
+            embedding_dim = opt.src_word_vec_size
+        else:
+            embedding_dim = opt.inference_network_src_word_vec_size
     else:
-        embedding_dim = opt.tgt_word_vec_size
+        if not for_inference_network:
+            embedding_dim = opt.tgt_word_vec_size
+        else:
+            embedding_dim = opt.inference_network_tgt_word_vec_size
 
     word_padding_idx = word_dict.stoi[onmt.io.PAD_WORD]
     num_word_embeddings = len(word_dict)
@@ -39,13 +46,17 @@ def make_embeddings(opt, word_dict, feature_dicts, for_encoder=True):
                          for feat_dict in feature_dicts]
     num_feat_embeddings = [len(feat_dict) for feat_dict in
                            feature_dicts]
+    if not for_inference_network:
+        dropout = opt.dropout
+    else:
+        dropout = opt.inference_network_dropout
 
     return Embeddings(word_vec_size=embedding_dim,
                       position_encoding=opt.position_encoding,
                       feat_merge=opt.feat_merge,
                       feat_vec_exponent=opt.feat_vec_exponent,
                       feat_vec_size=opt.feat_vec_size,
-                      dropout=opt.dropout,
+                      dropout=dropout,
                       word_padding_idx=word_padding_idx,
                       feat_padding_idx=feats_padding_idx,
                       word_vocab_size=num_word_embeddings,
@@ -74,6 +85,40 @@ def make_encoder(opt, embeddings):
         return RNNEncoder(opt.rnn_type, opt.brnn, opt.enc_layers,
                           opt.rnn_size, opt.dropout, embeddings,
                           opt.bridge)
+
+
+def make_inference_network(opt, src_embeddings, tgt_embeddings,
+                           src_dict, src_feature_dicts,
+                           tgt_dict, tgt_feature_dicts):
+    print ('Making inference network:')
+    if not opt.inference_network_share_embeddings:
+        print ('    * share embeddings: False')
+        src_embeddings = make_embeddings(opt, src_dict,
+                                         src_feature_dicts,
+                                         for_inference_network=True)
+        tgt_embeddings = make_embeddings(opt, tgt_dict,
+                                         feature_dicts, for_encoder=False,
+                                         for_inference_network=True)
+    else:
+        print ('    * share embeddings: True')
+
+    inference_network_type = opt.inference_network_type
+    inference_network_src_layers = opt.inference_network_src_layers
+    inference_network_tgt_layers = opt.inference_network_tgt_layers
+    rnn_type = opt.rnn_type
+    rnn_size = opt.inference_network_rnn_size
+    dropout = opt.inference_network_dropout
+    print ('    * inference network type: %s'%inference_network_type)
+    print ('    * inference network RNN type: %s'%rnn_type)
+    print ('    * inference network RNN size: %s'%rnn_size)
+    print ('    * inference network dropout: %s'%dropout)
+    print ('    * inference network src layers: %s'%inference_network_src_layers)
+    print ('    * inference network tgt layers: %s'%inference_network_tgt_layers)
+    print ('    * TODO: RNN\'s could be possibly shared')
+    return InferenceNetwork(inference_network_type,
+                            src_embeddings, tgt_embeddings,
+                            rnn_type, inference_network_src_layers,
+                            inference_network_tgt_layers, rnn_size, dropout)
 
 
 def make_decoder(opt, embeddings):
@@ -149,9 +194,9 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
     # Make encoder.
     if model_opt.model_type == "text":
         src_dict = fields["src"].vocab
-        feature_dicts = onmt.io.collect_feature_vocabs(fields, 'src')
+        src_feature_dicts = onmt.io.collect_feature_vocabs(fields, 'src')
         src_embeddings = make_embeddings(model_opt, src_dict,
-                                         feature_dicts)
+                                         src_feature_dicts)
         encoder = make_encoder(model_opt, src_embeddings)
     elif model_opt.model_type == "img":
         encoder = ImageEncoder(model_opt.enc_layers,
@@ -168,9 +213,9 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
 
     # Make decoder.
     tgt_dict = fields["tgt"].vocab
-    feature_dicts = onmt.io.collect_feature_vocabs(fields, 'tgt')
+    tgt_feature_dicts = onmt.io.collect_feature_vocabs(fields, 'tgt')
     tgt_embeddings = make_embeddings(model_opt, tgt_dict,
-                                     feature_dicts, for_encoder=False)
+                                     tgt_feature_dicts, for_encoder=False)
 
     # Share the embedding matrix - preprocess with share_vocab required.
     if model_opt.share_embeddings:
@@ -183,8 +228,14 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
 
     decoder = make_decoder(model_opt, tgt_embeddings)
 
-    # Make NMTModel(= encoder + decoder).
-    model = NMTModel(encoder, decoder)
+    # Make inference network.
+    inference_network = make_inference_network(model_opt,
+                                               src_embeddings, tgt_embeddings,
+                                               src_dict, src_feature_dicts,
+                                               tgt_dict, tgt_feature_dicts)
+
+    # Make NMTModel(= encoder + decoder + inference network).
+    model = NMTModel(encoder, decoder, inference_network)
     model.model_type = model_opt.model_type
 
     # Make Generator.
