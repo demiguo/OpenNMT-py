@@ -8,7 +8,7 @@ from torch.nn.utils.rnn import pack_padded_sequence as pack
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
 
 import onmt
-from onmt.Utils import aeq
+from onmt.Utils import aeq, sequence_mask
 
 
 def rnn_factory(rnn_type, **kwargs):
@@ -218,8 +218,15 @@ class InferenceNetwork(nn.Module):
                               .view(batch_size, src_length, rnn_size)
         src_memory_bank = src_memory_bank.transpose(1,2) # batch_size, rnn_size, src_length
         tgt_memory_bank = tgt_memory_bank.transpose(0,1) # batch_size, tgt_length, rnn_size
-        scores = torch.bmm(tgt_memory_bank, src_memory_bank) \
-                      .exp()# batch_size, tgt_length, src_length
+        scores = torch.bmm(tgt_memory_bank, src_memory_bank) #\
+                      #.exp()# batch_size, tgt_length, src_length
+        scores = scores - scores.min() + 0.0001
+        #scores = scores.exp()
+        # length
+        if src_lengths is not None:
+            mask = sequence_mask(src_lengths)
+            mask = mask.unsqueeze(1)
+            scores.data.masked_fill_(1-mask, 0)
         return scores
 
 class RNNDecoderBase(nn.Module):
@@ -633,6 +640,7 @@ class NMTModel(nn.Module):
         q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
         q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
         m = torch.distributions.Dirichlet(q_scores.cpu())
+        #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
         q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
         decoder_outputs, dec_state, attns = \
             self.decoder(tgt, memory_bank,

@@ -310,6 +310,20 @@ class Trainer(object):
                         batch, outputs, attns, j,
                         trunc_size, self.shard_size, normalization)
 
+                nans = [
+                    (name, param)
+                    for name, param in self.model.named_parameters()
+                    if param.grad is not None and (param.grad != param.grad).any()
+                ]
+                if nans:
+                    import pdb; pdb.set_trace()
+
+                for name, param in self.model.named_parameters():
+                    if param.grad is not None:
+                        param.grad[param.grad == float("Inf")] = 0
+                        param.grad[param.grad == float("-Inf")] = 0
+                        if (param.grad!=param.grad).any():
+                            param.grad[param.grad!=param.grad] = 0
                 # 4. Update the parameters and statistics.
                 if self.grad_accum_count == 1:
                     self.optim.step()
