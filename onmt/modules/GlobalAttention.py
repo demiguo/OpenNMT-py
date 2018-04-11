@@ -184,6 +184,7 @@ class GlobalAttention(nn.Module):
             c = torch.bmm(align_vectors, memory_bank)
         else:
             c = torch.bmm(q_scores_sample, memory_bank)
+        # what is size of q_scores_sample? batch, targetL, sourceL
 
         # concatenate
         concat_c = torch.cat([c, input], 2).view(batch*targetL, dim*2)

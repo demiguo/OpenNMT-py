@@ -353,7 +353,7 @@ class RNNDecoderBase(nn.Module):
         # END
 
         # Run the forward pass of the RNN.
-        decoder_final, decoder_outputs, attns = self._run_forward_pass(
+        decoder_final, decoder_outputs, attns, attn_losseses = self._run_forward_pass(
             tgt, memory_bank, state, memory_lengths=memory_lengths,
             q_scores_sample=q_scores_sample)
 
@@ -370,7 +370,7 @@ class RNNDecoderBase(nn.Module):
         for k in attns:
             attns[k] = torch.stack(attns[k])
 
-        return decoder_outputs, state, attns
+        return decoder_outputs, state, attns, attn_losses
 
     def init_decoder_state(self, src, memory_bank, encoder_final):
         def _fix_enc_hidden(h):
@@ -429,6 +429,9 @@ class StdRNNDecoder(RNNDecoderBase):
 
         # Initialize local and return variables.
         attns = {}
+        batch_size = tgt.size(1)
+        attn_losses = Variable(torch.zeros((batch_size)))
+        # TODO(demi): implement attn_losses here
         emb = self.embeddings(tgt)
 
         # Run the forward pass of the RNN.
@@ -463,7 +466,7 @@ class StdRNNDecoder(RNNDecoderBase):
                 decoder_outputs.view(tgt_len, tgt_batch, self.hidden_size)
 
         decoder_outputs = self.dropout(decoder_outputs)
-        return decoder_final, decoder_outputs, attns
+        return decoder_final, decoder_outputs, attns, attn_losses
 
     def _build_rnn(self, rnn_type, **kwargs):
         rnn, _ = rnn_factory(rnn_type, **kwargs)
@@ -633,8 +636,10 @@ class NMTModel(nn.Module):
                  * dictionary attention dists of `[tgt_len x batch x src_len]`
                  * final decoder state
         """
+
         tgt = tgt[:-1]  # exclude last target from inputs
         tgt_length, batch_size, rnn_size = tgt.size()
+        KL_losses = Variable(torch.zeros(batch_size))
 
         enc_final, memory_bank = self.encoder(src, lengths)
         enc_state = \
@@ -645,11 +650,13 @@ class NMTModel(nn.Module):
         if SAMPLE:
             q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
             m = torch.distributions.Dirichlet(q_scores.cpu())
+            entropy = m.entropy()
+            KL_losses += entropy
             #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
             q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
         else:
             q_scores_sample = F.softmax(q_scores, dim=-1).transpose(0, 1)
-        decoder_outputs, dec_state, attns = \
+        decoder_outputs, dec_state, attns, attn_losseses = \
             self.decoder(tgt, memory_bank,
                          enc_state if dec_state is None
                          else dec_state,
@@ -659,7 +666,8 @@ class NMTModel(nn.Module):
             # Not yet supported on multi-gpu
             dec_state = None
             attns = None
-        return decoder_outputs, attns, dec_state
+        return decoder_outputs, attns, dec_state, KL_losses
+        # TODO(demi): return a KL loss here
 
 
 class DecoderState(object):

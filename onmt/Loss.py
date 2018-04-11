@@ -38,7 +38,7 @@ class LossComputeBase(nn.Module):
         self.tgt_vocab = tgt_vocab
         self.padding_idx = tgt_vocab.stoi[onmt.io.PAD_WORD]
 
-    def _make_shard_state(self, batch, output, range_, attns=None):
+    def _make_shard_state(self, batch, output, range_, attns=None, additional_losses=None):
         """
         Make shard state dictionary for shards() to return iterable
         shards for efficient loss computation. Subclass must define
@@ -65,7 +65,7 @@ class LossComputeBase(nn.Module):
         """
         return NotImplementedError
 
-    def monolithic_compute_loss(self, batch, output, attns):
+    def monolithic_compute_loss(self, batch, output, attns, additional_losses=None):
         """
         Compute the forward loss for the batch.
 
@@ -80,14 +80,14 @@ class LossComputeBase(nn.Module):
             :obj:`onmt.Statistics`: loss statistics
         """
         range_ = (0, batch.tgt.size(0))
-        shard_state = self._make_shard_state(batch, output, range_, attns)
+        shard_state = self._make_shard_state(batch, output, range_, attns, additional_losses)
         _, batch_stats = self._compute_loss(batch, **shard_state)
 
         return batch_stats
 
     def sharded_compute_loss(self, batch, output, attns,
                              cur_trunc, trunc_size, shard_size,
-                             normalization):
+                             normalization, additional_losses=None):
         """Compute the forward loss and backpropagate.  Computation is done
         with shards and optionally truncation for memory efficiency.
 
@@ -117,7 +117,7 @@ class LossComputeBase(nn.Module):
         """
         batch_stats = onmt.Statistics()
         range_ = (cur_trunc, cur_trunc + trunc_size)
-        shard_state = self._make_shard_state(batch, output, range_, attns)
+        shard_state = self._make_shard_state(batch, output, range_, attns, additional_losses)
 
         for shard in shards(shard_state, shard_size):
             loss, stats = self._compute_loss(batch, **shard)
@@ -158,6 +158,8 @@ class NMTLossCompute(LossComputeBase):
                  label_smoothing=0.0):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
+
+        # TODO(demi): change this, add KL loss for inference network
         if label_smoothing > 0:
             # When label smoothing is turned on,
             # KL-divergence between q_{smoothed ground truth prob.}(w)
@@ -176,13 +178,15 @@ class NMTLossCompute(LossComputeBase):
             self.criterion = nn.NLLLoss(weight, size_average=False)
         self.confidence = 1.0 - label_smoothing
 
-    def _make_shard_state(self, batch, output, range_, attns=None):
+    def _make_shard_state(self, batch, output, range_, attns=None, additional_losses=None):
         return {
             "output": output,
             "target": batch.tgt[range_[0] + 1: range_[1]],
+            "additional_losses": additional_losses
         }
 
-    def _compute_loss(self, batch, output, target):
+    def _compute_loss(self, batch, output, target, additional_losses=None):
+        # TODO(demi): understand how sharding work and make sure "additional loss" works
         scores = self.generator(self._bottle(output))
 
         gtruth = target.view(-1)
@@ -197,6 +201,7 @@ class NMTLossCompute(LossComputeBase):
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
         loss = self.criterion(scores, gtruth)
+        loss = loss + additional_losses
         if self.confidence < 1:
             # Default: report smoothed ppl.
             # loss_data = -log_likelihood.sum(0)
