@@ -536,7 +536,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
         emb = self.embeddings(tgt)
         assert emb.dim() == 3  # len x batch x embedding_dim
 
-        tgt_len, batch_size = = emb.size(0), emb.size(1)
+        tgt_len, batch_size =  emb.size(0), emb.size(1)
         src_len = memory_bank.size(0)
 
         hidden = state.hidden
@@ -666,8 +666,6 @@ class NMTModel(nn.Module):
         if SAMPLE:
             q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
             m = torch.distributions.Dirichlet(q_scores.cpu())
-            entropy = m.entropy()
-            KL_losses += entropy
             #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
             q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
         else:
