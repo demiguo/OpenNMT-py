@@ -140,6 +140,8 @@ class GlobalAttention(nn.Module):
           * Computed vector `[tgt_len x batch x dim]`
           * Attention distribtutions for each query
              `[tgt_len x batch x src_len]`
+          * Unormalized attention scores for each query 
+            `[batch x tgt_len x src_len]`
         """
 
         # one step input
@@ -175,6 +177,7 @@ class GlobalAttention(nn.Module):
             align.data.masked_fill_(1 - mask, -float('inf'))
 
         # Softmax to normalize attention weights
+        raw_scores = align
         align_vectors = self.sm(align.view(batch*targetL, sourceL))
         align_vectors = align_vectors.view(batch, targetL, sourceL)
 
@@ -217,4 +220,4 @@ class GlobalAttention(nn.Module):
             aeq(batch, batch_)
             aeq(sourceL, sourceL_)
 
-        return attn_h, align_vectors
+        return attn_h, align_vectors, raw_scores
