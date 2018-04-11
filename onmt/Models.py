@@ -220,8 +220,11 @@ class InferenceNetwork(nn.Module):
         tgt_memory_bank = tgt_memory_bank.transpose(0,1) # batch_size, tgt_length, rnn_size
         scores = torch.bmm(tgt_memory_bank, src_memory_bank) #\
                       #.exp()# batch_size, tgt_length, src_length
-        scores = scores - scores.min() + 0.0001
-        #scores = scores.exp()
+        #print("max: {}, min: {}".format(scores.max(), scores.min()))
+        # affine
+        scores = scores - scores.min() + 1e-6
+        # exp
+        #scores = scores.clamp(-10, 10).exp() 
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
@@ -638,10 +641,14 @@ class NMTModel(nn.Module):
             self.decoder.init_decoder_state(src, memory_bank, enc_final)
         # inference network q(z|x,y)
         q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
-        q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
-        m = torch.distributions.Dirichlet(q_scores.cpu())
-        #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
-        q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
+        SAMPLE = True
+        if SAMPLE:
+            q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
+            m = torch.distributions.Dirichlet(q_scores.cpu())
+            #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
+            q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
+        else:
+            q_scores_sample = F.softmax(q_scores, dim=-1).transpose(0, 1)
         decoder_outputs, dec_state, attns = \
             self.decoder(tgt, memory_bank,
                          enc_state if dec_state is None
