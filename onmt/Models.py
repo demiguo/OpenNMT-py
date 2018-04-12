@@ -224,7 +224,7 @@ class InferenceNetwork(nn.Module):
         # affine
         scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-6
         # exp is extremely slow.
-        scores = scores.clamp(-5, 10).exp()
+        #scores = scores.clamp(-5, 10).exp()
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
