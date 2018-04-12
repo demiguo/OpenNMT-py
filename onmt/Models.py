@@ -222,9 +222,9 @@ class InferenceNetwork(nn.Module):
                       #.exp()# batch_size, tgt_length, src_length
         #print("max: {}, min: {}".format(scores.max(), scores.min()))
         # affine
-        scores = scores - scores.min() + 1e-6
+        scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-6
         # exp
-        #scores = scores.clamp(-10, 10).exp() 
+        #scores = scores.clamp(-2, 10).exp()
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
