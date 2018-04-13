@@ -222,9 +222,9 @@ class InferenceNetwork(nn.Module):
                       #.exp()# batch_size, tgt_length, src_length
         #print("max: {}, min: {}".format(scores.max(), scores.min()))
         # affine
-        scores = scores - scores.min() + 1e-6
+        #scores = scores - scores.min() + 1e-6
         # exp
-        #scores = scores.clamp(-10, 10).exp() 
+        scores = scores.clamp(-1, 1).exp() 
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
@@ -561,7 +561,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
                 q_scores_sample=q_sample)
 
             # raw_scores: [batch x tgt_len x src_len]
-            assert raw_scores.size() == (batch_size, tgt_len, src_len)
+            assert raw_scores.size() == (batch_size, 1, src_len)
 
             p_a_scores += [raw_scores]
             if self.context_gate is not None:
@@ -590,7 +590,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
             elif self._copy:
                 attns["copy"] = attns["std"]
         # Return result.
-        p_a_scores = torch.cat(p_a_scores, dim=1)
+        p_a_scores = torch.cat(p_a_scores, dim=1).clamp(-1,1).exp()
         assert p_a_scores.size() == (batch_size, tgt_len, src_len)
         return hidden, decoder_outputs, attns, p_a_scores
 
