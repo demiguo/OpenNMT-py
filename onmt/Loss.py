@@ -212,8 +212,6 @@ class NMTLossCompute(LossComputeBase):
         q_dist = torch.distributions.Dirichlet(q_scores.view(-1, q_scores.size(2)))
         p_a_dist = torch.distributions.Dirichlet(p_a_scores.view(-1, p_a_scores.size(2)))
         kl_loss = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
-        print (kl_loss)
-        print (loss)
         assert loss.size() == kl_loss.size(), "loss.size():{}\nkl_loss.size():{}\n".format(loss.size(), kl_loss.size())
         loss += kl_loss
 
