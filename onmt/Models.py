@@ -229,7 +229,7 @@ class InferenceNetwork(nn.Module):
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
             mask = mask.unsqueeze(1)
-            scores.data.masked_fill_(1-mask, 0)
+            scores.data.masked_fill_(1-mask, 1e-6)
         return scores
 
 class RNNDecoderBase(nn.Module):
@@ -353,7 +353,7 @@ class RNNDecoderBase(nn.Module):
         # END
 
         # Run the forward pass of the RNN.
-        decoder_final, decoder_outputs, attns = self._run_forward_pass(
+        decoder_final, decoder_outputs, attns, p_a_scores = self._run_forward_pass(
             tgt, memory_bank, state, memory_lengths=memory_lengths,
             q_scores_sample=q_scores_sample)
 
@@ -370,7 +370,7 @@ class RNNDecoderBase(nn.Module):
         for k in attns:
             attns[k] = torch.stack(attns[k])
 
-        return decoder_outputs, state, attns
+        return decoder_outputs, state, attns, p_a_scores
 
     def init_decoder_state(self, src, memory_bank, encoder_final):
         def _fix_enc_hidden(h):
@@ -429,7 +429,11 @@ class StdRNNDecoder(RNNDecoderBase):
 
         # Initialize local and return variables.
         attns = {}
+        batch_size = tgt.size(1)
+        p_a_scores = None  # batch_size, tgt_length, src_length
+        # TODO(demi): implement p_a_scores here
         emb = self.embeddings(tgt)
+        src_len = memory_bank.size(0)
 
         # Run the forward pass of the RNN.
         if isinstance(self.rnn, nn.GRU):
@@ -445,7 +449,7 @@ class StdRNNDecoder(RNNDecoderBase):
         # END
 
         # Calculate the attention.
-        decoder_outputs, p_attn = self.attn(
+        decoder_outputs, p_attn, p_a_scores = self.attn(
             rnn_output.transpose(0, 1).contiguous(),
             memory_bank.transpose(0, 1),
             memory_lengths=memory_lengths
@@ -463,7 +467,9 @@ class StdRNNDecoder(RNNDecoderBase):
                 decoder_outputs.view(tgt_len, tgt_batch, self.hidden_size)
 
         decoder_outputs = self.dropout(decoder_outputs)
-        return decoder_final, decoder_outputs, attns
+        assert p_a_scores.size() == (tgt_batch, tgt_len, src_len)
+
+        return decoder_final, decoder_outputs, attns, p_a_scores
 
     def _build_rnn(self, rnn_type, **kwargs):
         rnn, _ = rnn_factory(rnn_type, **kwargs)
@@ -517,6 +523,8 @@ class InputFeedRNNDecoder(RNNDecoderBase):
         aeq(tgt_batch, input_feed_batch)
         # END Additional args check.
 
+        p_a_scores = []  # batch x tgt_len x src_len
+
         # Initialize local and return variables.
         decoder_outputs = []
         attns = {"std": []}
@@ -527,6 +535,9 @@ class InputFeedRNNDecoder(RNNDecoderBase):
 
         emb = self.embeddings(tgt)
         assert emb.dim() == 3  # len x batch x embedding_dim
+
+        tgt_len, batch_size =  emb.size(0), emb.size(1)
+        src_len = memory_bank.size(0)
 
         hidden = state.hidden
         coverage = state.coverage.squeeze(0) \
@@ -543,11 +554,16 @@ class InputFeedRNNDecoder(RNNDecoderBase):
                 q_sample = q_scores_sample[i]
             else:
                 q_sample = None
-            decoder_output, p_attn = self.attn(
+            decoder_output, p_attn, raw_scores = self.attn(
                 rnn_output,
                 memory_bank.transpose(0, 1),
                 memory_lengths=memory_lengths,
                 q_scores_sample=q_sample)
+
+            # raw_scores: [batch x tgt_len x src_len]
+            assert raw_scores.size() == (batch_size, 1, src_len)
+
+            p_a_scores += [raw_scores]
             if self.context_gate is not None:
                 # TODO: context gate should be employed
                 # instead of second RNN transform.
@@ -574,7 +590,15 @@ class InputFeedRNNDecoder(RNNDecoderBase):
             elif self._copy:
                 attns["copy"] = attns["std"]
         # Return result.
-        return hidden, decoder_outputs, attns
+        p_a_scores = torch.cat(p_a_scores, dim=1)
+        #p_a_scores = p_a_scores - p_a_scores.min(-1)[0].unsqueeze(-1) + 1e-6
+        p_a_scores = p_a_scores.clamp(-5,10).exp()
+        if memory_lengths is not None:
+            mask = sequence_mask(memory_lengths)
+            mask = mask.unsqueeze(1)
+            p_a_scores.data.masked_fill_(1-mask, 1e-6)
+        assert p_a_scores.size() == (batch_size, tgt_len, src_len)
+        return hidden, decoder_outputs, attns, p_a_scores
 
     def _build_rnn(self, rnn_type, input_size,
                    hidden_size, num_layers, dropout):
@@ -633,14 +657,17 @@ class NMTModel(nn.Module):
                  * dictionary attention dists of `[tgt_len x batch x src_len]`
                  * final decoder state
         """
+
         tgt = tgt[:-1]  # exclude last target from inputs
         tgt_length, batch_size, rnn_size = tgt.size()
+        KL_losses = Variable(torch.zeros(batch_size))
 
         enc_final, memory_bank = self.encoder(src, lengths)
         enc_state = \
             self.decoder.init_decoder_state(src, memory_bank, enc_final)
         # inference network q(z|x,y)
         q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
+        src_length = q_scores.size(2)
         SAMPLE = True
         if SAMPLE:
             q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
@@ -649,7 +676,7 @@ class NMTModel(nn.Module):
             q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
         else:
             q_scores_sample = F.softmax(q_scores, dim=-1).transpose(0, 1)
-        decoder_outputs, dec_state, attns = \
+        decoder_outputs, dec_state, attns, p_a_scores = \
             self.decoder(tgt, memory_bank,
                          enc_state if dec_state is None
                          else dec_state,
@@ -659,7 +686,11 @@ class NMTModel(nn.Module):
             # Not yet supported on multi-gpu
             dec_state = None
             attns = None
-        return decoder_outputs, attns, dec_state
+
+        return decoder_outputs, attns, dec_state,\
+               (q_scores.view(batch_size, tgt_length, src_length),\
+               p_a_scores)
+        # p_a_scores: feed in sampled a, output unormalized attention scores (batch_size, tgt_length, src_length)
 
 
 class DecoderState(object):
