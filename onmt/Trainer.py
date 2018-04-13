@@ -222,11 +222,11 @@ class Trainer(object):
             tgt = onmt.io.make_features(batch, 'tgt')
 
             # F-prop through the model.
-            outputs, attns, _ = self.model(src, tgt, src_lengths)
+            outputs, attns, _, dist_scores = self.model(src, tgt, src_lengths)
 
             # Compute loss.
             batch_stats = self.valid_loss.monolithic_compute_loss(
-                    batch, outputs, attns)
+                    batch, outputs, attns, dist_scores=dist_scores)
 
             # Update statistics.
             stats.update(batch_stats)
@@ -302,13 +302,13 @@ class Trainer(object):
                 # 2. F-prop all but generator.
                 if self.grad_accum_count == 1:
                     self.model.zero_grad()
-                outputs, attns, dec_state = \
+                outputs, attns, dec_state, dist_scores = \
                     self.model(src, tgt, src_lengths, dec_state)
 
                 # 3. Compute loss in shards for memory efficiency.
                 batch_stats = self.train_loss.sharded_compute_loss(
                         batch, outputs, attns, j,
-                        trunc_size, self.shard_size, normalization)
+                        trunc_size, self.shard_size, normalization, dist_scores=dist_scores)
 
                 nans = [
                     (name, param)
