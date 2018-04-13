@@ -222,9 +222,9 @@ class InferenceNetwork(nn.Module):
                       #.exp()# batch_size, tgt_length, src_length
         #print("max: {}, min: {}".format(scores.max(), scores.min()))
         # affine
-        scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-6
+        #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-6
         # exp is extremely slow.
-        #scores = scores.clamp(-3, 5).exp()
+        scores = scores.clamp(-3, 5).exp()
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
@@ -592,7 +592,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
         # Return result.
         p_a_scores = torch.cat(p_a_scores, dim=1)
         #p_a_scores = p_a_scores - p_a_scores.min(-1)[0].unsqueeze(-1) + 1e-6
-        p_a_scores = p_a_scores.clamp(-5,10).exp()
+        p_a_scores = p_a_scores.clamp(-3,5).exp()
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)
             mask = mask.unsqueeze(1)
