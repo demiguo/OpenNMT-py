@@ -591,7 +591,8 @@ class InputFeedRNNDecoder(RNNDecoderBase):
             elif self._copy:
                 attns["copy"] = attns["std"]
         # Return result.
-        p_a_scores = torch.cat(p_a_scores, dim=1).clamp(-1,1).exp()
+        p_a_scores = torch.cat(p_a_scores, dim=1)
+        p_a_scores = p_a_scores - p_a_scores.min(-1)[0].unsqueeze(-1) + 1e-6
         assert p_a_scores.size() == (batch_size, tgt_len, src_len)
         return hidden, decoder_outputs, attns, p_a_scores
 
