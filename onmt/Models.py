@@ -222,14 +222,15 @@ class InferenceNetwork(nn.Module):
                       #.exp()# batch_size, tgt_length, src_length
         #print("max: {}, min: {}".format(scores.max(), scores.min()))
         # affine
-        #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-6
+        #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
         # exp is extremely slow.
-        scores = scores.clamp(-5, 10).exp()
+        #scores = scores.clamp(-1, 1).exp()
+        scores = scores.clamp(min=1e-2)
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
             mask = mask.unsqueeze(1)
-            scores.data.masked_fill_(1-mask, 1e-6)
+            scores.data.masked_fill_(1-mask, 1e-2)
         return scores
 
 class RNNDecoderBase(nn.Module):
@@ -591,12 +592,13 @@ class InputFeedRNNDecoder(RNNDecoderBase):
                 attns["copy"] = attns["std"]
         # Return result.
         p_a_scores = torch.cat(p_a_scores, dim=1)
-        #p_a_scores = p_a_scores - p_a_scores.min(-1)[0].unsqueeze(-1) + 1e-6
-        p_a_scores = p_a_scores.clamp(-5,10).exp()
+        #p_a_scores = p_a_scores - p_a_scores.min(-1)[0].unsqueeze(-1) + 1e-2
+        #p_a_scores = p_a_scores.clamp(-1,1).exp()
+        p_a_scores = p_a_scores.clamp(min=1e-2)
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)
             mask = mask.unsqueeze(1)
-            p_a_scores.data.masked_fill_(1-mask, 1e-6)
+            p_a_scores.data.masked_fill_(1-mask, 1e-2)
         assert p_a_scores.size() == (batch_size, tgt_len, src_len)
         return hidden, decoder_outputs, attns, p_a_scores
 
