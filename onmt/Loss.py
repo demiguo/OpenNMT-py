@@ -182,6 +182,8 @@ class NMTLossCompute(LossComputeBase):
         if dist_scores is not None:
             # NB(demi): not exactly sure how sharding works yet, so let's separate q_scores and p_a_scores here for now
             q_scores, p_a_scores = dist_scores
+            q_scores = q_scores.transpose(0, 1)
+            p_a_scores = p_a_scores.transpose(0, 1)
         else:
             q_scores, p_a_scores = None, None
         return {
@@ -207,10 +209,13 @@ class NMTLossCompute(LossComputeBase):
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
         loss = self.criterion(scores, gtruth)
-            
+        q_scores = q_scores.contiguous().view(-1, q_scores.size(2))
+        p_a_scores = p_a_scores.contiguous().view(-1, p_a_scores.size(2))
+        q_scores = q_scores[gtruth.ne(self.padding_idx)]
+        p_a_scores = p_a_scores[gtruth.ne(self.padding_idx)]
         # Q(demi): why do we need to do ".cpu" in models.py?
-        q_dist = torch.distributions.Dirichlet(q_scores.view(-1, q_scores.size(2)))
-        p_a_dist = torch.distributions.Dirichlet(p_a_scores.view(-1, p_a_scores.size(2)))
+        q_dist = torch.distributions.Dirichlet(q_scores)
+        p_a_dist = torch.distributions.Dirichlet(p_a_scores)
         kl_loss = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
         assert loss.size() == kl_loss.size(), "loss.size():{}\nkl_loss.size():{}\n".format(loss.size(), kl_loss.size())
         loss += kl_loss
