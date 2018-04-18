@@ -126,7 +126,7 @@ class LossComputeBase(nn.Module):
 
         return batch_stats
 
-    def _stats(self, loss, scores, target):
+    def _stats(self, loss, xent, kl, scores, target):
         """
         Args:
             loss (:obj:`FloatTensor`): the loss computed by the loss criterion.
@@ -141,7 +141,12 @@ class LossComputeBase(nn.Module):
         num_correct = pred.eq(target) \
                           .masked_select(non_padding) \
                           .long().sum()
-        return onmt.Statistics(loss.cpu().numpy(), non_padding.long().sum().cpu().numpy(), num_correct.cpu().numpy())
+        return onmt.Statistics(
+            loss.cpu().numpy(),
+            xent.cpu().numpy(),
+            kl.cpu().numpy(),
+            non_padding.long().sum().cpu().numpy(),
+            num_correct.cpu().numpy())
 
     def _bottle(self, v):
         return v.view(-1, v.size(2))
@@ -208,17 +213,18 @@ class NMTLossCompute(LossComputeBase):
                 log_likelihood.index_fill_(0, mask, 0)
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
-        loss = self.criterion(scores, gtruth)
+        xent = self.criterion(scores, gtruth)
         q_scores = q_scores.contiguous().view(-1, q_scores.size(2))
         p_a_scores = p_a_scores.contiguous().view(-1, p_a_scores.size(2))
         q_scores = q_scores[gtruth.ne(self.padding_idx)]
         p_a_scores = p_a_scores[gtruth.ne(self.padding_idx)]
         # Q(demi): why do we need to do ".cpu" in models.py?
-        q_dist = torch.distributions.Dirichlet(q_scores)
-        p_a_dist = torch.distributions.Dirichlet(p_a_scores)
-        kl_loss = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
-        assert loss.size() == kl_loss.size(), "loss.size():{}\nkl_loss.size():{}\n".format(loss.size(), kl_loss.size())
-        loss += kl_loss
+        q_dist = torch.distributions.Dirichlet(q_scores.detach())
+        p_a_dist = torch.distributions.Dirichlet(p_a_scores.detach())
+        kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+        assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
+        #loss += kl
+        loss = xent # + kl
 
         if self.confidence < 1:
             # Default: report smoothed ppl.
@@ -227,7 +233,7 @@ class NMTLossCompute(LossComputeBase):
         else:
             loss_data = loss.data.clone()
 
-        stats = self._stats(loss_data, scores.data, target.view(-1).data)
+        stats = self._stats(loss_data, xent.data.clone(), kl.data.clone(), scores.data, target.view(-1).data)
 
         return loss, stats
 

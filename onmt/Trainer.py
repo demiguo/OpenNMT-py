@@ -29,8 +29,10 @@ class Statistics(object):
     * perplexity
     * elapsed time
     """
-    def __init__(self, loss=0, n_words=0, n_correct=0):
+    def __init__(self, loss=0, xent=0, kl=0, n_words=0, n_correct=0):
         self.loss = loss
+        self._xent = xent
+        self._kl = kl
         self.n_words = n_words
         self.n_correct = n_correct
         self.n_src_words = 0
@@ -38,6 +40,8 @@ class Statistics(object):
 
     def update(self, stat):
         self.loss += stat.loss
+        self._xent += stat._xent
+        self._kl += stat._kl
         self.n_words += stat.n_words
         self.n_correct += stat.n_correct
 
@@ -45,10 +49,16 @@ class Statistics(object):
         return 100 * (self.n_correct / self.n_words)
 
     def xent(self):
-        return self.loss / self.n_words
+        return self._xent / self.n_words
 
     def ppl(self):
         return math.exp(min(self.loss / self.n_words, 100))
+
+    def kl(self):
+        return self._kl / self.n_words
+
+    def pppl(self):
+        return math.exp(self.xent())
 
     def elapsed_time(self):
         return time.time() - self.start_time
@@ -64,11 +74,14 @@ class Statistics(object):
         """
         t = self.elapsed_time()
         print(("Epoch %2d, %5d/%5d; acc: %6.2f; ppl: %6.2f; xent: %6.2f; " +
+                "pppl: %6.2f; kl: %6.2f; " +
                "%3.0f src tok/s; %3.0f tgt tok/s; %6.0f s elapsed") %
-              (epoch, batch,  n_batches,
+              (epoch, batch, n_batches,
                self.accuracy(),
                self.ppl(),
                self.xent(),
+               self.pppl(),
+               self.kl(),
                self.n_src_words / (t + 1e-5),
                self.n_words / (t + 1e-5),
                time.time() - start))
