@@ -528,7 +528,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
 
         # Initialize local and return variables.
         decoder_outputs = []
-        attns = {"std": []}
+        attns = {"std": [], "q": []}
         if self._copy:
             attns["copy"] = []
         if self._coverage:
@@ -576,6 +576,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
 
             decoder_outputs += [decoder_output]
             attns["std"] += [p_attn]
+            attns["q"] += [q_sample]
 
             # Update the coverage attention.
             if self._coverage:
