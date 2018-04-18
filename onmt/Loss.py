@@ -155,11 +155,11 @@ class NMTLossCompute(LossComputeBase):
     Standard NMT Loss Computation.
     """
     def __init__(self, generator, tgt_vocab, normalization="sents",
-                 label_smoothing=0.0):
+                 label_smoothing=0.0, enable_kl=True):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
 
-        # TODO(demi): change this, add KL loss for inference network
+	self.enable_kl = enable_kl
         if label_smoothing > 0:
             # When label smoothing is turned on,
             # KL-divergence between q_{smoothed ground truth prob.}(w)
@@ -215,7 +215,8 @@ class NMTLossCompute(LossComputeBase):
         print (kl_loss)
         print (loss)
         assert loss.size() == kl_loss.size(), "loss.size():{}\nkl_loss.size():{}\n".format(loss.size(), kl_loss.size())
-        loss += kl_loss
+        if self.enable_kl:
+		loss += kl_loss
 
         if self.confidence < 1:
             # Default: report smoothed ppl.

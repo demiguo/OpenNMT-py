@@ -79,6 +79,9 @@ def model_opts(parser):
                        help='Number of layers in the inference network tgt RNN')
     group.add_argument('-inference_network_rnn_size', type=int, default=500,
                        help='Size of rnn hidden states in the inference network RNN')
+    group.add_argument("-inference_attn_type", type=str, default="exp",
+		       help="Attention Type for inference network: Affine, Exp")
+	
 
     group.add_argument('-layers', type=int, default=-1,
                        help='Number of layers in enc/dec.')
@@ -137,6 +140,9 @@ def model_opts(parser):
                        help='Train a coverage attention layer.')
     group.add_argument('-lambda_coverage', type=float, default=1,
                        help='Lambda value for coverage.')
+    group.add_argument("-enable_kl", type=bool, default=True,
+		       help='Enable KL for variational attention model')	
+    
 
 
 def preprocess_opts(parser):

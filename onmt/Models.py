@@ -190,8 +190,9 @@ class RNNEncoder(EncoderBase):
 
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
-                 rnn_type, src_layers, tgt_layers, rnn_size, dropout):
+                 rnn_type, src_layers, tgt_layers, rnn_size, dropout, attn_type="exp"):
         super(InferenceNetwork, self).__init__()
+        self.attn_type = attn_type
         if inference_network_type == 'embedding_only':
             self.src_encoder = src_embeddings
             self.tgt_encoder = tgt_embeddings
@@ -223,9 +224,13 @@ class InferenceNetwork(nn.Module):
         #print("max: {}, min: {}".format(scores.max(), scores.min()))
         # affine
 
-        scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-6
-        # exp is extremely slow.
-        #scores = scores.clamp(-5, 10).exp()
+        if self.attn_type == "affine":
+	        scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-6	
+	    elif self.attn_type == "exp":
+	        #exp is extremely slow.
+            scores = scores.clamp(-5, 10).exp() 
+        else:
+            assert False, "inference network attention type (%s) not found" % sefl.attn_type
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
