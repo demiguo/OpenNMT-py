@@ -10,6 +10,7 @@ from torch.nn.utils.rnn import pad_packed_sequence as unpack
 import onmt
 from onmt.Utils import aeq, sequence_mask
 
+import numpy as np
 
 def rnn_factory(rnn_type, **kwargs):
     # Use pytorch version when available.
@@ -190,9 +191,10 @@ class RNNEncoder(EncoderBase):
 
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
-                 rnn_type, src_layers, tgt_layers, rnn_size, dropout, attn_type="exp"):
+                 rnn_type, src_layers, tgt_layers, rnn_size, dropout, attn_type="exp", dist_type="dirichlet"):
         super(InferenceNetwork, self).__init__()
         self.attn_type = attn_type
+        self.dist_type = dist_type
         if inference_network_type == 'embedding_only':
             self.src_encoder = src_embeddings
             self.tgt_encoder = tgt_embeddings
@@ -224,13 +226,13 @@ class InferenceNetwork(nn.Module):
         #print("max: {}, min: {}".format(scores.max(), scores.min()))
         # affine
 
-        if self.attn_type == "affine":
+        if self.dist_type == "dirichlet" and self.attn_type == "affine":
 	        scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-6	
-	    elif self.attn_type == "exp":
+        elif self.dist_type == "dirichlet" and self.attn_type == "exp":
 	        #exp is extremely slow.
             scores = scores.clamp(-5, 10).exp() 
         else:
-            assert False, "inference network attention type (%s) not found" % sefl.attn_type
+            pass
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
@@ -288,7 +290,8 @@ class RNNDecoderBase(nn.Module):
                  hidden_size, attn_type="general",
                  coverage_attn=False, context_gate=None,
                  copy_attn=False, dropout=0.0, embeddings=None,
-                 reuse_copy_attn=False):
+                 reuse_copy_attn=False,
+                 dist_type="dirichlet"):
         super(RNNDecoderBase, self).__init__()
 
         # Basic attributes.
@@ -298,6 +301,7 @@ class RNNDecoderBase(nn.Module):
         self.hidden_size = hidden_size
         self.embeddings = embeddings
         self.dropout = nn.Dropout(dropout)
+        self.dist_type = dist_type
 
         # Build the RNN.
         self.rnn = self._build_rnn(rnn_type,
@@ -596,7 +600,10 @@ class InputFeedRNNDecoder(RNNDecoderBase):
             elif self._copy:
                 attns["copy"] = attns["std"]
         # Return result.
-        p_a_scores = torch.cat(p_a_scores, dim=1).clamp(-1,1).exp()
+        if self.dist_type == "dirichlet":
+            p_a_scores = torch.cat(p_a_scores, dim=1).clamp(-1,1).exp()
+        else:
+            p_a_scores = torch.cat(p_a_scores, dim=1)
         assert p_a_scores.size() == (batch_size, tgt_len, src_len)
         return hidden, decoder_outputs, attns, p_a_scores
 
@@ -629,12 +636,13 @@ class NMTModel(nn.Module):
       decoder (:obj:`RNNDecoderBase`): a decoder object
       multi<gpu (bool): setup for multigpu support
     """
-    def __init__(self, encoder, decoder, inference_network, multigpu=False):
+    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="dirichlet"):
         self.multigpu = multigpu
         super(NMTModel, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.inference_network = inference_network
+        self.dist_type = dist_type
 
     def forward(self, src, tgt, lengths, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
@@ -671,7 +679,14 @@ class NMTModel(nn.Module):
         SAMPLE = True
         if SAMPLE:
             q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
-            m = torch.distributions.Dirichlet(q_scores.cpu())
+            if self.dist_type == "dirichlet":
+                m = torch.distributions.Dirichlet(q_scores.cpu())
+            else:
+                #cov = torch.FloatTensor(np.identity(q_scores.size(-1)))
+                #cov = cov.unsqueeze(0).expand(q_scores.size(0), q_scores.size(-1), q_scores.size(-1))
+                #import pdb; pdb.set_trace()
+                cov = torch.ones((q_scores.size(0), q_scores.size(1)))
+                m = torch.distributions.log_normal.LogNormal(q_scores.cpu(), cov)
             #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
             q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
         else:

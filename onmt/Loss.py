@@ -12,6 +12,7 @@ from torch.autograd import Variable
 import onmt
 import onmt.io
 
+import numpy as np
 
 class LossComputeBase(nn.Module):
     """
@@ -155,11 +156,12 @@ class NMTLossCompute(LossComputeBase):
     Standard NMT Loss Computation.
     """
     def __init__(self, generator, tgt_vocab, normalization="sents",
-                 label_smoothing=0.0, enable_kl=True):
+                 label_smoothing=0.0, enable_kl=True, dist_type="dirichlet", gpuid=0):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
-
-	self.enable_kl = enable_kl
+        self.enable_kl = enable_kl
+        self.dist_type = dist_type
+        self.gpuid = gpuid
         if label_smoothing > 0:
             # When label smoothing is turned on,
             # KL-divergence between q_{smoothed ground truth prob.}(w)
@@ -209,15 +211,28 @@ class NMTLossCompute(LossComputeBase):
         loss = self.criterion(scores, gtruth)
             
         # Q(demi): why do we need to do ".cpu" in models.py?
-        q_dist = torch.distributions.Dirichlet(q_scores.view(-1, q_scores.size(2)))
-        p_a_dist = torch.distributions.Dirichlet(p_a_scores.view(-1, p_a_scores.size(2)))
+        q_scores = q_scores.view(-1, q_scores.size(2))
+        p_a_scores = p_a_scores.view(-1, p_a_scores.size(2))
+        src_len = q_scores.size(-1)
+        batch_size = q_scores.size(0)
+        #import pdb; pdb.set_trace()
+        assert p_a_scores.size() == (batch_size, src_len)
+        if self.dist_type == "dirichlet":
+            q_dist = torch.distributions.Dirichlet(q_scores)
+            p_a_dist = torch.distributions.Dirichlet(p_a_scores)
+        else:
+            #cov = torch.FloatTensor(np.identity(src_len))
+            #cov = cov.unsqueeze(0).expand(batch_size, src_len, src_len)
+            cov = torch.ones((batch_size, src_len)).cuda(self.gpuid[0])
+            q_dist = torch.distributions.log_normal.LogNormal(q_scores, cov)
+            p_a_dist = torch.distributions.log_normal.LogNormal(p_a_scores, cov)
+
         kl_loss = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
         print (kl_loss)
         print (loss)
         assert loss.size() == kl_loss.size(), "loss.size():{}\nkl_loss.size():{}\n".format(loss.size(), kl_loss.size())
         if self.enable_kl:
-		loss += kl_loss
-
+            loss += kl_loss
         if self.confidence < 1:
             # Default: report smoothed ppl.
             # loss_data = -log_likelihood.sum(0)

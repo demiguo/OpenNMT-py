@@ -65,6 +65,10 @@ def model_opts(parser):
                        help="""Type of inference network to use.
                        Options are
                        [rnn|brnn|embedding_only].""")
+    group.add_argument('-dist_type', type=str, default="dirichlet",
+                        choices=['dirichlet', 'log_normal'],
+                        help="""Type of distributions of Q and p_a distribution.
+                        Options are [dirichlet|log_normal]""")
     group.add_argument('-inference_network_share_embeddings', type=int, default=1,
                        help="""Use src/tgt word embeddings for inference network.""")
     group.add_argument('-inference_network_src_word_vec_size', type=int, default=500,
@@ -80,7 +84,8 @@ def model_opts(parser):
     group.add_argument('-inference_network_rnn_size', type=int, default=500,
                        help='Size of rnn hidden states in the inference network RNN')
     group.add_argument("-inference_attn_type", type=str, default="exp",
-		       help="Attention Type for inference network: Affine, Exp")
+                        choices=["exp", "affine"],
+		                help="Attention Type for inference network: [affine, exp]")
 	
 
     group.add_argument('-layers', type=int, default=-1,

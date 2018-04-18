@@ -118,7 +118,9 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     return InferenceNetwork(inference_network_type,
                             src_embeddings, tgt_embeddings,
                             rnn_type, inference_network_src_layers,
-                            inference_network_tgt_layers, rnn_size, dropout, opt.inference_attn_type)
+                            inference_network_tgt_layers, rnn_size, dropout,
+                            opt.inference_attn_type,
+                            opt.dist_type)
 
 
 def make_decoder(opt, embeddings):
@@ -146,7 +148,8 @@ def make_decoder(opt, embeddings):
                                    opt.copy_attn,
                                    opt.dropout,
                                    embeddings,
-                                   opt.reuse_copy_attn)
+                                   opt.reuse_copy_attn,
+                                   opt.dist_type)
     else:
         return StdRNNDecoder(opt.rnn_type, opt.brnn,
                              opt.dec_layers, opt.rnn_size,
@@ -156,7 +159,8 @@ def make_decoder(opt, embeddings):
                              opt.copy_attn,
                              opt.dropout,
                              embeddings,
-                             opt.reuse_copy_attn)
+                             opt.reuse_copy_attn,
+                             opt.dist_type)
 
 
 def load_test_model(opt, dummy_opt):
@@ -235,7 +239,7 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
                                                tgt_dict, tgt_feature_dicts)
 
     # Make NMTModel(= encoder + decoder + inference network).
-    model = NMTModel(encoder, decoder, inference_network)
+    model = NMTModel(encoder, decoder, inference_network, dist_type=model_opt.dist_type)
     model.model_type = model_opt.model_type
 
     # Make Generator.

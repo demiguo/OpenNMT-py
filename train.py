@@ -217,7 +217,9 @@ def make_loss_compute(model, tgt_vocab, opt, train=True):
         compute = onmt.Loss.NMTLossCompute(
             model.generator, tgt_vocab,
             label_smoothing=(opt.label_smoothing if train else 0.0),
-	    enable_kl=opt.enable_kl)
+	        enable_kl=opt.enable_kl,
+            dist_type=opt.dist_type,
+            gpuid=opt.gpuid)
 
     if use_gpu(opt):
         compute.cuda()
