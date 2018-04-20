@@ -579,6 +579,8 @@ class InputFeedRNNDecoder(RNNDecoderBase):
         # Initialize local and return variables.
         decoder_outputs = []
         attns = {"std": []}
+        if q_scores_sample is not None:
+            attns["q"] = []
         if self._copy:
             attns["copy"] = []
         if self._coverage:
@@ -628,6 +630,8 @@ class InputFeedRNNDecoder(RNNDecoderBase):
 
             decoder_outputs += [decoder_output]
             attns["std"] += [p_attn]
+            if q_sample is not None:
+                attns["q"] += [q_sample]
 
             # Update the coverage attention.
             if self._coverage:
@@ -720,6 +724,7 @@ class NMTModel(nn.Module):
         enc_final, memory_bank = self.encoder(src, lengths)
         enc_state = \
             self.decoder.init_decoder_state(src, memory_bank, enc_final)
+<<<<<<< HEAD
         # inference network q(z|x,y)
         q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
         q_nparam = len(q_scores)
@@ -735,8 +740,23 @@ class NMTModel(nn.Module):
                 m = torch.distributions.log_normal.LogNormal(q_scores[0], q_scores[1])
             #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
             q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
+=======
+        if self.inference_network is not None:
+            # inference network q(z|x,y)
+            q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
+            src_length = q_scores.size(2)
+            SAMPLE = False
+            if SAMPLE:
+                q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
+                m = torch.distributions.Dirichlet(q_scores.cpu())
+                #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
+                q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
+            else:
+                q_scores_sample = F.softmax(q_scores, dim=-1).transpose(0, 1)
+>>>>>>> d6c39f7c449afbcdcc006794030c010308475122
         else:
-            q_scores_sample = F.softmax(q_scores, dim=-1).transpose(0, 1)
+            q_scores = None
+            q_scores_sample = None
         decoder_outputs, dec_state, attns, p_a_scores = \
             self.decoder(tgt, memory_bank,
                          enc_state if dec_state is None
@@ -751,12 +771,19 @@ class NMTModel(nn.Module):
         for i in range(q_nparam):
             q_scores[i] = q_scores[i].view(batch_size, tgt_length, src_length)
 
+<<<<<<< HEAD
         if self.dist_type == "dirichlet":
             return decoder_outputs, attns, dec_state,\
                (q_scores[0], p_a_scores[0])
         else:
             return decoder_outputs, attns, dec_state,\
                (q_scores[0], q_scores[1], p_a_scores[0], p_a_scores[1])
+=======
+        return decoder_outputs, attns, dec_state,\
+               (q_scores.view(batch_size, tgt_length, src_length),\
+               p_a_scores) if q_scores is not None else None
+        # p_a_scores: feed in sampled a, output unormalized attention scores (batch_size, tgt_length, src_length)
+>>>>>>> d6c39f7c449afbcdcc006794030c010308475122
 
 
 class DecoderState(object):

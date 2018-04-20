@@ -90,6 +90,8 @@ def make_encoder(opt, embeddings):
 def make_inference_network(opt, src_embeddings, tgt_embeddings,
                            src_dict, src_feature_dicts,
                            tgt_dict, tgt_feature_dicts):
+    if opt.inference_network_type == "none":
+        return None
     print ('Making inference network:')
     if not opt.inference_network_share_embeddings:
         print ('    * share embeddings: False')
@@ -255,7 +257,8 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
     # Load the model states from checkpoint or initialize them.
     if checkpoint is not None:
         print('Loading model parameters.')
-        model.load_state_dict(checkpoint['model'])
+        #model.load_state_dict(checkpoint['model'])
+        model.load_state_dict(checkpoint['model'], strict=False)
         generator.load_state_dict(checkpoint['generator'])
     else:
         if model_opt.param_init != 0.0:

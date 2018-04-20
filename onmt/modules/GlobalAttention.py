@@ -204,7 +204,7 @@ class GlobalAttention(nn.Module):
 
         # compute attention scores, as in Luong et al.
         #align = self.score(input, memory_bank)
-        align = self.score(input.detach(), memory_bank.detach())
+        align = self.score(input, memory_bank)
 
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)

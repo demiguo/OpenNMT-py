@@ -361,8 +361,14 @@ def collect_report_features(fields):
 
 def build_model(model_opt, opt, fields, checkpoint):
     print('Building model...')
-    model = onmt.ModelConstructor.make_base_model(model_opt, fields,
-                                                  use_gpu(opt), checkpoint)
+    if opt.init_with:
+        model = onmt.ModelConstructor.make_base_model(
+            model_opt, fields,
+            use_gpu(opt), checkpoint)
+    else:
+        model = onmt.ModelConstructor.make_base_model(
+            model_opt, fields,
+            use_gpu(opt), checkpoint)
     if len(opt.gpuid) > 1:
         print('Multi gpu training: ', opt.gpuid)
         model = nn.DataParallel(model, device_ids=opt.gpuid, dim=1)
@@ -407,6 +413,11 @@ def main():
         model_opt = checkpoint['opt']
         # I don't like reassigning attributes of opt: it's not clear.
         opt.start_epoch = checkpoint['epoch'] + 1
+    elif opt.init_with:
+        print('Loading checkpoint from %s' % opt.init_with)
+        checkpoint = torch.load(opt.init_with,
+                                map_location=lambda storage, loc: storage)
+        model_opt = opt
     else:
         checkpoint = None
         model_opt = opt

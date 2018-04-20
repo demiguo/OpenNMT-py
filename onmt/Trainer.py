@@ -229,6 +229,11 @@ class Trainer(object):
             src = onmt.io.make_features(batch, 'src', self.data_type)
             if self.data_type == 'text':
                 _, src_lengths = batch.src
+                # overwrite source
+                x = src.clone()
+                for i, l in enumerate(src_lengths.tolist()):
+                    x[:l,i,0].copy_(torch.arange(l)+5)
+                #src = x
             else:
                 src_lengths = None
 
@@ -303,6 +308,11 @@ class Trainer(object):
             if self.data_type == 'text':
                 _, src_lengths = batch.src
                 report_stats.n_src_words += src_lengths.sum()
+                # LOL remove source information
+                x = src.clone()
+                for i, l in enumerate(src_lengths.tolist()):
+                    x[:l,i,0].copy_(torch.arange(l)+5)
+                #src = x
             else:
                 src_lengths = None
 

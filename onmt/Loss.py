@@ -239,7 +239,10 @@ class NMTLossCompute(LossComputeBase):
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
         
-        if self.dist_type == "dirichlet":
+        if q_scores_0 is None or p_a_scores_0 is None:
+            loss = xent
+            kl = torch.Tensor([0])
+        elif self.dist_type == "dirichlet":
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
             p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
             q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
@@ -247,6 +250,10 @@ class NMTLossCompute(LossComputeBase):
 
             q_dist = torch.distributions.Dirichlet(q_scores_0.detach())
             p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.detach())
+            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+            assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
+            #loss += kl
+            loss = xent # + kl
         else:
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
             p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
@@ -262,11 +269,10 @@ class NMTLossCompute(LossComputeBase):
             q_dist = torch.distributions.log_normal.LogNormal(q_scores_0, q_scores_1)
             p_a_dist = torch.distributions.log_normal.LogNormal(p_a_scores_0, p_a_scores_1)
 
-        kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
-        assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
-        #loss += kl
-        loss = xent # + kl
-
+            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+            assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
+            #loss += kl
+            loss = xent # + kl
         if self.confidence < 1:
             # Default: report smoothed ppl.
             # loss_data = -log_likelihood.sum(0)
