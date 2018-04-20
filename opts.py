@@ -79,6 +79,8 @@ def model_opts(parser):
                        help='Number of layers in the inference network tgt RNN')
     group.add_argument('-inference_network_rnn_size', type=int, default=500,
                        help='Size of rnn hidden states in the inference network RNN')
+    group.add_argument("-dist_type", type=str, default="log_normal",
+                        help="q and p_a distribution type")
 
     group.add_argument('-layers', type=int, default=-1,
                        help='Number of layers in enc/dec.')

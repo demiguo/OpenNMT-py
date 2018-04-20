@@ -58,11 +58,12 @@ class GlobalAttention(nn.Module):
        attn_type (str): type of attention to use, options [dot,general,mlp]
 
     """
-    def __init__(self, dim, coverage=False, attn_type="dot"):
+    def __init__(self, dim, coverage=False, attn_type="dot", dist_type="log_normal"):
         super(GlobalAttention, self).__init__()
 
         self.dim = dim
         self.attn_type = attn_type
+        self.dist_type = dist_type
         assert (self.attn_type in ["dot", "general", "mlp"]), (
                 "Please select a valid attention type.")
 
@@ -72,6 +73,13 @@ class GlobalAttention(nn.Module):
             self.linear_context = nn.Linear(dim, dim, bias=False)
             self.linear_query = nn.Linear(dim, dim, bias=True)
             self.v = nn.Linear(dim, 1, bias=False)
+
+        if self.dist_type == "log_normal":
+            self.linear_1 = nn.Linear(dim + dim, 100)
+            self.linear_2 = nn.Linear(100, 100)
+            self.softplus = torch.nn.Softplus()
+            self.mean_out = nn.Linear(100, 1)
+            self.var_out = nn.Linear(100, 1)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
@@ -124,6 +132,32 @@ class GlobalAttention(nn.Module):
             wquh = self.tanh(wq + uh)
 
             return self.v(wquh.view(-1, dim)).view(tgt_batch, tgt_len, src_len)
+
+    def get_raw_scores(self, h_t, h_s):
+        """
+            For log normal.
+        """
+        src_batch, src_len, src_dim = h_s.size()
+        tgt_batch, tgt_len, tgt_dim = h_t.size()
+        aeq(src_batch, tgt_batch)
+        aeq(src_dim, tgt_dim)
+        aeq(self.dim, src_dim)
+        
+        h_t_expand = h_t.unsqueeze(2).expand(-1, -1, src_len, -1)
+        h_s_expand = h_s.unsqueeze(1).expand(-1, tgt_len, -1, -1)
+        # [batch, tgt_len, src_len, src_dim]
+        h_expand = torch.cat((h_t_expand, h_s_expand), dim=3)
+        h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
+        
+        h_enc = self.softplus(self.linear_1(h_fold))
+        h_enc = self.softplus(self.linear_2(h_enc))
+        
+        h_mean = self.softplus(self.mean_out(h_enc))
+        h_var = self.softplus(self.var_out(h_enc))
+        
+        h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+        h_var = h_var.view(tgt_batch, tgt_len, src_len)
+        return [h_mean, h_var]
 
     def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):
         """
@@ -178,7 +212,10 @@ class GlobalAttention(nn.Module):
             align.data.masked_fill_(1 - mask, -float('inf'))
 
         # Softmax to normalize attention weights
-        raw_scores = align
+        if self.dist_type == "dirichlet":
+            raw_scores = [align]
+        else:
+            raw_scores = self.get_raw_scores(input, memory_bank)
         align_vectors = self.sm(align.view(batch*targetL, sourceL))
         align_vectors = align_vectors.view(batch, targetL, sourceL)
 

@@ -118,7 +118,8 @@ class LossComputeBase(nn.Module):
         batch_stats = onmt.Statistics()
         range_ = (cur_trunc, cur_trunc + trunc_size)
         shard_state = self._make_shard_state(batch, output, range_, attns, dist_scores=dist_scores)
-
+        #print("sharded compute loss")
+        #import pdb; pdb.set_trace()
         for shard in shards(shard_state, shard_size):
             loss, stats = self._compute_loss(batch, **shard)
             loss.div(normalization).backward(retain_graph=True)
@@ -160,11 +161,12 @@ class NMTLossCompute(LossComputeBase):
     Standard NMT Loss Computation.
     """
     def __init__(self, generator, tgt_vocab, normalization="sents",
-                 label_smoothing=0.0):
+                 label_smoothing=0.0, dist_type="log_normal"):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
 
         # TODO(demi): change this, add KL loss for inference network
+        self.dist_type = dist_type
         if label_smoothing > 0:
             # When label smoothing is turned on,
             # KL-divergence between q_{smoothed ground truth prob.}(w)
@@ -186,19 +188,41 @@ class NMTLossCompute(LossComputeBase):
     def _make_shard_state(self, batch, output, range_, attns=None, dist_scores=None):
         if dist_scores is not None:
             # NB(demi): not exactly sure how sharding works yet, so let's separate q_scores and p_a_scores here for now
-            q_scores, p_a_scores = dist_scores
-            q_scores = q_scores.transpose(0, 1)
-            p_a_scores = p_a_scores.transpose(0, 1)
+            if self.dist_type == "dirichlet":
+                q_scores, p_a_scores = dist_scores
+                q_scores = q_scores.transpose(0, 1)
+                p_a_scores = p_a_scores.transpose(0, 1)
+            else:
+                assert self.dist_type == "log_normal", "Dist Type not found in make shard state"
+                q_scores_0, q_scores_1, p_a_scores_0, p_a_scores_1 = dist_scores
+                # TODO(demi): understand why we want to transpose
+                q_scores_0 = q_scores_0.transpose(0, 1)
+                p_a_scores_0 = p_a_scores_0.transpose(0, 1)
+                q_scores_1 = q_scores_1.transpose(0, 1)
+                p_a_scores_1 = p_a_scores_1.transpose(0, 1)
+ 
         else:
             q_scores, p_a_scores = None, None
-        return {
-            "output": output,
-            "target": batch.tgt[range_[0] + 1: range_[1]],
-            "q_scores": q_scores,
-            "p_a_scores": p_a_scores
-        }
+        if self.dist_type == "dirichlet":
 
-    def _compute_loss(self, batch, output, target, q_scores=None, p_a_scores=None):
+            return {
+                "output": output,
+                "target": batch.tgt[range_[0] + 1: range_[1]],
+                "q_scores_0": q_scores,
+                "p_a_scores_0": p_a_scores,
+                "q_scores_1": None,
+                "p_a_scores_1": None
+            }
+        else:
+            return {
+                "output": output,
+                "target": batch.tgt[range_[0] + 1: range_[1]],
+                "q_scores_0": q_scores_0,
+                "p_a_scores_0": p_a_scores_0,
+                "q_scores_1": q_scores_1,
+                "p_a_scores_1": p_a_scores_1
+            }
+    def _compute_loss(self, batch, output, target, q_scores_0=None, p_a_scores_0=None, q_scores_1=None, p_a_scores_1=None):
         # TODO(demi): understand how sharding work and make sure "additional loss" works
         scores = self.generator(self._bottle(output))
 
@@ -214,13 +238,30 @@ class NMTLossCompute(LossComputeBase):
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
-        q_scores = q_scores.contiguous().view(-1, q_scores.size(2))
-        p_a_scores = p_a_scores.contiguous().view(-1, p_a_scores.size(2))
-        q_scores = q_scores[gtruth.ne(self.padding_idx)]
-        p_a_scores = p_a_scores[gtruth.ne(self.padding_idx)]
-        # Q(demi): why do we need to do ".cpu" in models.py?
-        q_dist = torch.distributions.Dirichlet(q_scores.detach())
-        p_a_dist = torch.distributions.Dirichlet(p_a_scores.detach())
+        
+        if self.dist_type == "dirichlet":
+            q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
+            p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
+            q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
+            p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
+
+            q_dist = torch.distributions.Dirichlet(q_scores_0.detach())
+            p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.detach())
+        else:
+            q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
+            p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
+            q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
+            p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
+
+            q_scores_1 = q_scores_1.contiguous().view(-1, q_scores_1.size(2))
+            p_a_scores_1 = p_a_scores_1.contiguous().view(-1, p_a_scores_1.size(2))
+            # 64, 15, 12
+            q_scores_1 = q_scores_1[gtruth.ne(self.padding_idx)]
+            p_a_scores_1 = p_a_scores_1[gtruth.ne(self.padding_idx)]
+
+            q_dist = torch.distributions.log_normal.LogNormal(q_scores_0, q_scores_1)
+            p_a_dist = torch.distributions.log_normal.LogNormal(p_a_scores_0, p_a_scores_1)
+
         kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
         assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
         #loss += kl
