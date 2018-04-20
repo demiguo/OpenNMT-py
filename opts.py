@@ -61,27 +61,6 @@ def model_opts(parser):
                        are experimental. Options are
                        [rnn|transformer|cnn].""")
 
-    group = parser.add_argument_group('Inference Network')
-    group.add_argument('-inference_network_type', type=str, default='none',
-                       choices=['rnn', 'brnn', 'embedding_only', 'none'],
-                       help="""Type of inference network to use.
-                       Options are
-                       [rnn|brnn|embedding_only].""")
-    group.add_argument('-inference_network_share_embeddings', type=int, default=1,
-                       help="""Use src/tgt word embeddings for inference network.""")
-    group.add_argument('-inference_network_src_word_vec_size', type=int, default=500,
-                       help="""Inference network src word vec size.""")
-    group.add_argument('-inference_network_tgt_word_vec_size', type=int, default=500,
-                       help="""Inference network tgt word vec size.""")
-    group.add_argument('-inference_network_dropout', type=int, default=0.3,
-                       help="""Inference network dropout.""")
-    group.add_argument('-inference_network_src_layers', type=int, default=2,
-                       help='Number of layers in the inference network src RNN')
-    group.add_argument('-inference_network_tgt_layers', type=int, default=2,
-                       help='Number of layers in the inference network tgt RNN')
-    group.add_argument('-inference_network_rnn_size', type=int, default=500,
-                       help='Size of rnn hidden states in the inference network RNN')
-
     group.add_argument('-layers', type=int, default=-1,
                        help='Number of layers in enc/dec.')
     group.add_argument('-enc_layers', type=int, default=2,
@@ -118,6 +97,28 @@ def model_opts(parser):
                        choices=['source', 'target', 'both'],
                        help="""Type of context gate to use.
                        Do not select for no context gate.""")
+
+    # Inference Network options
+    group = parser.add_argument_group('Inference Network')
+    group.add_argument('-inference_network_type', type=str, default='none',
+                       choices=['rnn', 'brnn', 'embedding_only', 'none'],
+                       help="""Type of inference network to use.
+                       Options are
+                       [rnn|brnn|embedding_only].""")
+    group.add_argument('-inference_network_share_embeddings', type=int, default=1,
+                       help="""Use src/tgt word embeddings for inference network.""")
+    group.add_argument('-inference_network_src_word_vec_size', type=int, default=500,
+                       help="""Inference network src word vec size.""")
+    group.add_argument('-inference_network_tgt_word_vec_size', type=int, default=500,
+                       help="""Inference network tgt word vec size.""")
+    group.add_argument('-inference_network_dropout', type=int, default=0.3,
+                       help="""Inference network dropout.""")
+    group.add_argument('-inference_network_src_layers', type=int, default=2,
+                       help='Number of layers in the inference network src RNN')
+    group.add_argument('-inference_network_tgt_layers', type=int, default=2,
+                       help='Number of layers in the inference network tgt RNN')
+    group.add_argument('-inference_network_rnn_size', type=int, default=500,
+                       help='Size of rnn hidden states in the inference network RNN')
 
     # Attention options
     group = parser.add_argument_group('Model- Attention')
@@ -261,6 +262,11 @@ def train_opts(parser):
 
     group.add_argument('-train_from', default='', type=str,
                        help="""If training from a checkpoint then this is the
+                       path to the pretrained model's state_dict.""")
+
+    group.add_argument('-init_with', default='', type=str,
+                       help="""If initializing a variational model
+                       from a checkpoint then this is the
                        path to the pretrained model's state_dict.""")
 
     # Pretrained word vectors
