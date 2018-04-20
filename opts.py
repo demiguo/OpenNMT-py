@@ -60,8 +60,10 @@ def model_opts(parser):
                        help="""Type of decoder layer to use. Non-RNN layers
                        are experimental. Options are
                        [rnn|transformer|cnn].""")
-    group.add_argument('-inference_network_type', type=str, default='brnn',
-                       choices=['rnn', 'brnn', 'embedding_only',],
+
+    group = parser.add_argument_group('Inference Network')
+    group.add_argument('-inference_network_type', type=str, default='none',
+                       choices=['rnn', 'brnn', 'embedding_only', 'none'],
                        help="""Type of inference network to use.
                        Options are
                        [rnn|brnn|embedding_only].""")

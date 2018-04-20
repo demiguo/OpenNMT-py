@@ -90,6 +90,8 @@ def make_encoder(opt, embeddings):
 def make_inference_network(opt, src_embeddings, tgt_embeddings,
                            src_dict, src_feature_dicts,
                            tgt_dict, tgt_feature_dicts):
+    if opt.inference_network_type == "none":
+        return None
     print ('Making inference network:')
     if not opt.inference_network_share_embeddings:
         print ('    * share embeddings: False')

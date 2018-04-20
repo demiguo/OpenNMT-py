@@ -214,17 +214,21 @@ class NMTLossCompute(LossComputeBase):
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
-        q_scores = q_scores.contiguous().view(-1, q_scores.size(2))
-        p_a_scores = p_a_scores.contiguous().view(-1, p_a_scores.size(2))
-        q_scores = q_scores[gtruth.ne(self.padding_idx)]
-        p_a_scores = p_a_scores[gtruth.ne(self.padding_idx)]
-        # Q(demi): why do we need to do ".cpu" in models.py?
-        q_dist = torch.distributions.Dirichlet(q_scores.detach())
-        p_a_dist = torch.distributions.Dirichlet(p_a_scores.detach())
-        kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
-        assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
-        #loss += kl
-        loss = xent # + kl
+        if q_scores is not None and p_a_scores is not None:
+            q_scores = q_scores.contiguous().view(-1, q_scores.size(2))
+            p_a_scores = p_a_scores.contiguous().view(-1, p_a_scores.size(2))
+            q_scores = q_scores[gtruth.ne(self.padding_idx)]
+            p_a_scores = p_a_scores[gtruth.ne(self.padding_idx)]
+            # Q(demi): why do we need to do ".cpu" in models.py?
+            q_dist = torch.distributions.Dirichlet(q_scores.detach())
+            p_a_dist = torch.distributions.Dirichlet(p_a_scores.detach())
+            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+            assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
+            #loss += kl
+            loss = xent # + kl
+        else:
+            loss = xent
+            kl = torch.Tensor([0])
 
         if self.confidence < 1:
             # Default: report smoothed ppl.

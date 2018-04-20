@@ -66,7 +66,7 @@ model.cuda() # lol
 nlls = None
 attns = None
 wordnlls = None
-if os.path.isfile(nllpath) and os.path.isfile(attnpath) and os.path.isfile(wordpath):
+if False and os.path.isfile(nllpath) and os.path.isfile(attnpath) and os.path.isfile(wordpath):
     nlls = torch.load(nllpath)
     attns = torch.load(attnpath)
     wordnlls = torch.load(wordpath)
@@ -98,9 +98,11 @@ else:
             attns.append(attn)
             wordnlls.append(bloss)
 
+    """
     torch.save(nlls, nllpath)
     torch.save(attns, attnpath)
     torch.save(wordnlls, wordpath)
+    """
 
 
 def visualize_attn():
