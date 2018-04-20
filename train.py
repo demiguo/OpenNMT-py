@@ -216,7 +216,8 @@ def make_loss_compute(model, tgt_vocab, opt, train=True):
     else:
         compute = onmt.Loss.NMTLossCompute(
             model.generator, tgt_vocab,
-            label_smoothing=opt.label_smoothing if train else 0.0)
+            label_smoothing=opt.label_smoothing if train else 0.0,
+            stochastic=opt.stochastic_posterior > 0)
 
     if use_gpu(opt):
         compute.cuda()
@@ -360,14 +361,15 @@ def collect_report_features(fields):
 
 def build_model(model_opt, opt, fields, checkpoint):
     print('Building model...')
-    if opt.init_with:
-        model = onmt.ModelConstructor.make_base_model(
-            model_opt, fields,
-            use_gpu(opt), checkpoint)
-    else:
-        model = onmt.ModelConstructor.make_base_model(
-            model_opt, fields,
-            use_gpu(opt), checkpoint)
+    model = onmt.ModelConstructor.make_base_model(
+        model_opt, fields,
+        use_gpu(opt), checkpoint)
+
+    if opt.freeze_generative_model:
+        for name, param in model.named_parameters():
+            if "inference_network" not in name and "attn" not in name:
+                param.requires_grad = False
+
     if len(opt.gpuid) > 1:
         print('Multi gpu training: ', opt.gpuid)
         model = nn.DataParallel(model, device_ids=opt.gpuid, dim=1)

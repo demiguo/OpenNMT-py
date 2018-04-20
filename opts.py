@@ -100,6 +100,12 @@ def model_opts(parser):
 
     # Inference Network options
     group = parser.add_argument_group('Inference Network')
+    group.add_argument("-freeze_generative_model", type=int, default=0,
+                       help="""Freeze the generative model, except the attn prior.
+                       """)
+    group.add_argument("-stochastic_posterior", type=int, default=1,
+                       help="""If 1, sample from the posterior and prior.
+                       """)
     group.add_argument('-inference_network_type', type=str, default='none',
                        choices=['rnn', 'brnn', 'embedding_only', 'none'],
                        help="""Type of inference network to use.

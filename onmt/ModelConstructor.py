@@ -110,6 +110,8 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     rnn_type = opt.rnn_type
     rnn_size = opt.inference_network_rnn_size
     dropout = opt.inference_network_dropout
+    mask_val = 1e-2 if opt.stochastic_posterior else float("-inf")
+
     print ('    * inference network type: %s'%inference_network_type)
     print ('    * inference network RNN type: %s'%rnn_type)
     print ('    * inference network RNN size: %s'%rnn_size)
@@ -117,10 +119,13 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     print ('    * inference network src layers: %s'%inference_network_src_layers)
     print ('    * inference network tgt layers: %s'%inference_network_tgt_layers)
     print ('    * TODO: RNN\'s could be possibly shared')
-    return InferenceNetwork(inference_network_type,
-                            src_embeddings, tgt_embeddings,
-                            rnn_type, inference_network_src_layers,
-                            inference_network_tgt_layers, rnn_size, dropout)
+
+    return InferenceNetwork(
+        inference_network_type,
+        src_embeddings, tgt_embeddings,
+        rnn_type, inference_network_src_layers,
+        inference_network_tgt_layers, rnn_size, dropout,
+        mask_val)
 
 
 def make_decoder(opt, embeddings):
@@ -231,13 +236,15 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
     decoder = make_decoder(model_opt, tgt_embeddings)
 
     # Make inference network.
-    inference_network = make_inference_network(model_opt,
-                                               src_embeddings, tgt_embeddings,
-                                               src_dict, src_feature_dicts,
-                                               tgt_dict, tgt_feature_dicts)
+    inference_network = make_inference_network(
+        model_opt,
+        src_embeddings, tgt_embeddings,
+        src_dict, src_feature_dicts,
+        tgt_dict, tgt_feature_dicts)
 
     # Make NMTModel(= encoder + decoder + inference network).
-    model = NMTModel(encoder, decoder, inference_network)
+    model = NMTModel(
+        encoder, decoder, inference_network, model_opt.stochastic_posterior > 0)
     model.model_type = model_opt.model_type
 
     # Make Generator.

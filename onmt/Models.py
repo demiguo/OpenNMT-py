@@ -190,8 +190,9 @@ class RNNEncoder(EncoderBase):
 
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
-                 rnn_type, src_layers, tgt_layers, rnn_size, dropout):
+                 rnn_type, src_layers, tgt_layers, rnn_size, dropout, mask_val):
         super(InferenceNetwork, self).__init__()
+        self.mask_val = mask_val
         if inference_network_type == 'embedding_only':
             self.src_encoder = src_embeddings
             self.tgt_encoder = tgt_embeddings
@@ -230,7 +231,8 @@ class InferenceNetwork(nn.Module):
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
             mask = mask.unsqueeze(1)
-            scores.data.masked_fill_(1-mask, 1e-2)
+            scores.data.masked_fill_(1-mask, self.mask_val)
+
         return scores
 
 class RNNDecoderBase(nn.Module):
@@ -596,9 +598,12 @@ class InputFeedRNNDecoder(RNNDecoderBase):
                 attns["copy"] = attns["std"]
         # Return result.
         p_a_scores = torch.cat(p_a_scores, dim=1)
+
+        # Prior stuff, only if stochastic?
         #p_a_scores = p_a_scores - p_a_scores.min(-1)[0].unsqueeze(-1) + 1e-2
         #p_a_scores = p_a_scores.clamp(-1,1).exp()
-        p_a_scores = p_a_scores.clamp(min=1e-2)
+        #p_a_scores = p_a_scores.clamp(min=1e-2)
+        
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)
             mask = mask.unsqueeze(1)
@@ -635,12 +640,13 @@ class NMTModel(nn.Module):
       decoder (:obj:`RNNDecoderBase`): a decoder object
       multi<gpu (bool): setup for multigpu support
     """
-    def __init__(self, encoder, decoder, inference_network, multigpu=False):
+    def __init__(self, encoder, decoder, inference_network, stochastic=False, multigpu=False):
         self.multigpu = multigpu
         super(NMTModel, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.inference_network = inference_network
+        self.stochastic = stochastic
 
     def forward(self, src, tgt, lengths, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
@@ -675,8 +681,7 @@ class NMTModel(nn.Module):
             # inference network q(z|x,y)
             q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
             src_length = q_scores.size(2)
-            SAMPLE = False
-            if SAMPLE:
+            if self.stochastic:
                 q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
                 m = torch.distributions.Dirichlet(q_scores.cpu())
                 #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
@@ -697,9 +702,17 @@ class NMTModel(nn.Module):
             dec_state = None
             attns = None
 
-        return decoder_outputs, attns, dec_state,\
-               (q_scores.view(batch_size, tgt_length, src_length),\
-               p_a_scores) if q_scores is not None else None
+        if self.inference_network is not None:
+            q_return = q_scores if self.stochastic else q_scores_sample.contiguous()
+            return (
+                decoder_outputs, attns, dec_state,
+                (
+                    q_return.view(batch_size, tgt_length, src_length),
+                    p_a_scores,
+                ),
+            )
+        else:
+            return decoder_outputs, attns, dec_state, None
         # p_a_scores: feed in sampled a, output unormalized attention scores (batch_size, tgt_length, src_length)
 
 

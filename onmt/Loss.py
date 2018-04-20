@@ -8,6 +8,7 @@ from __future__ import division
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 import onmt
 import onmt.io
@@ -160,10 +161,11 @@ class NMTLossCompute(LossComputeBase):
     Standard NMT Loss Computation.
     """
     def __init__(self, generator, tgt_vocab, normalization="sents",
-                 label_smoothing=0.0):
+                 label_smoothing=0.0, stochastic=False):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
 
+        self.stochastic = stochastic
         # TODO(demi): change this, add KL loss for inference network
         if label_smoothing > 0:
             # When label smoothing is turned on,
@@ -214,21 +216,30 @@ class NMTLossCompute(LossComputeBase):
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
+
         if q_scores is not None and p_a_scores is not None:
             q_scores = q_scores.contiguous().view(-1, q_scores.size(2))
             p_a_scores = p_a_scores.contiguous().view(-1, p_a_scores.size(2))
             q_scores = q_scores[gtruth.ne(self.padding_idx)]
             p_a_scores = p_a_scores[gtruth.ne(self.padding_idx)]
-            # Q(demi): why do we need to do ".cpu" in models.py?
-            q_dist = torch.distributions.Dirichlet(q_scores.detach())
-            p_a_dist = torch.distributions.Dirichlet(p_a_scores.detach())
-            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
-            assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
-            #loss += kl
-            loss = xent # + kl
+
+            if self.stochastic:
+                # Use torch.distributions to minimize KL
+                # Q(demi): why do we need to do ".cpu" in models.py?
+                q_dist = torch.distributions.Dirichlet(q_scores.detach())
+                p_a_dist = torch.distributions.Dirichlet(p_a_scores.detach())
+                kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+                assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
+            else:
+                # Minimize KL from sample, lol.
+                q_dist = torch.distributions.Categorical(q_scores)
+                p_a_dist = torch.distributions.Categorical(p_a_scores)
+                kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+
+            loss = xent + kl
         else:
-            loss = xent
             kl = torch.Tensor([0])
+            loss = xent
 
         if self.confidence < 1:
             # Default: report smoothed ppl.
