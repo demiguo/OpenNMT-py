@@ -60,7 +60,6 @@ def model_opts(parser):
                        help="""Type of decoder layer to use. Non-RNN layers
                        are experimental. Options are
                        [rnn|transformer|cnn].""")
-
     group.add_argument('-layers', type=int, default=-1,
                        help='Number of layers in enc/dec.')
     group.add_argument('-enc_layers', type=int, default=2,
@@ -103,9 +102,11 @@ def model_opts(parser):
     group.add_argument("-freeze_generative_model", type=int, default=0,
                        help="""Freeze the generative model, except the attn prior.
                        """)
-    group.add_argument("-stochastic_posterior", type=int, default=1,
-                       help="""If 1, sample from the posterior and prior.
-                       """)
+    group.add_argument("-dist_type", type=str, default="log_normal",
+                        choices=["log_normal", "dirichlet", "none"],
+                        help="""q and p_a distribution type.
+                        If 'none', then uses a softmax over scores.
+                        """)
     group.add_argument('-inference_network_type', type=str, default='none',
                        choices=['rnn', 'brnn', 'embedding_only', 'none'],
                        help="""Type of inference network to use.

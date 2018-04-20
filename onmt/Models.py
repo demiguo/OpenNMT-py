@@ -190,9 +190,15 @@ class RNNEncoder(EncoderBase):
 
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
-                 rnn_type, src_layers, tgt_layers, rnn_size, dropout, mask_val):
+                 rnn_type, src_layers, tgt_layers, rnn_size, dropout,
+                 dist_type="none"):
         super(InferenceNetwork, self).__init__()
-        self.mask_val = mask_val
+        self.dist_type = dist_type
+        if dist_type == "none":
+            self.mask_val = float("-inf")
+        else:
+            self.mask_val = 1e-2
+
         if inference_network_type == 'embedding_only':
             self.src_encoder = src_embeddings
             self.tgt_encoder = tgt_embeddings
@@ -208,6 +214,43 @@ class InferenceNetwork(nn.Module):
                                           dropout, tgt_embeddings, False) 
 
         self.W = torch.nn.Linear(rnn_size, rnn_size)
+        self.rnn_size = rnn_size
+
+        # to parametrize log normal distribution
+        if self.dist_type == "log_normal":
+            # TODO(demi): make 100 configurable
+            self.linear_1 = torch.nn.Linear(rnn_size + rnn_size, 100)
+            self.linear_2 = torch.nn.Linear(100, 100)
+            self.mean_out = torch.nn.Linear(100, 1)
+            self.var_out = torch.nn.Linear(100, 1)
+            self.softplus = torch.nn.Softplus()
+
+    def get_log_normal_scores(self, h_s, h_t):
+        """ h_s: [batch x src_length x rnn_size]
+            h_t: [batch x tgt_length x rnn_size]
+        """
+        src_batch, src_len, src_dim = h_s.size()
+        tgt_batch, tgt_len, tgt_dim = h_t.size()
+        aeq(src_batch, tgt_batch)
+        aeq(src_dim, tgt_dim)
+        aeq(self.rnn_size, src_dim)
+        
+        #import pdb; pdb.set_trace()
+        h_t_expand = h_t.unsqueeze(2).expand(-1, -1, src_len, -1)
+        h_s_expand = h_s.unsqueeze(1).expand(-1, tgt_len, -1, -1)
+        # [batch, tgt_len, src_len, src_dim]
+        h_expand = torch.cat((h_t_expand, h_s_expand), dim=3)
+        h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
+        
+        h_enc = self.softplus(self.linear_1(h_fold))
+        h_enc = self.softplus(self.linear_2(h_enc))
+        
+        h_mean = self.softplus(self.mean_out(h_enc))
+        h_var = self.softplus(self.var_out(h_enc))
+        
+        h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+        h_var = h_var.view(tgt_batch, tgt_len, src_len)
+        return [h_mean, h_var]
 
     def forward(self, src, tgt, src_lengths=None):
         src_final, src_memory_bank = self.src_encoder(src, src_lengths)
@@ -219,20 +262,32 @@ class InferenceNetwork(nn.Module):
                               .view(batch_size, src_length, rnn_size)
         src_memory_bank = src_memory_bank.transpose(1,2) # batch_size, rnn_size, src_length
         tgt_memory_bank = tgt_memory_bank.transpose(0,1) # batch_size, tgt_length, rnn_size
-        scores = torch.bmm(tgt_memory_bank, src_memory_bank) #\
-                      #.exp()# batch_size, tgt_length, src_length
-        #print("max: {}, min: {}".format(scores.max(), scores.min()))
-        # affine
-        #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
-        # exp is extremely slow.
-        #scores = scores.clamp(-2, 5).exp()
-        #scores = scores.clamp(min=1)
+        if self.dist_type == "dirichlet":
+            scores = torch.bmm(tgt_memory_bank, src_memory_bank)
+            #print("max: {}, min: {}".format(scores.max(), scores.min()))
+            # affine
+            scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
+            # exp
+            #scores = scores.clamp(-1, 1).exp()
+            #scores = scores.clamp(min=1e-2)
+            scores = [scores]
+        elif self.dist_type == "log_normal":
+            # log normal
+            src_memory_bank = src_memory_bank.transpose(1, 2)
+            assert src_memory_bank.size() == (batch_size, src_length, rnn_size)
+            scores = self.get_log_normal_scores(src_memory_bank, tgt_memory_bank)
+        elif self.dist_type == "none":
+            scores = [torch.bmm(tgt_memory_bank, src_memory_bank)]
+        else:
+            raise Exception("Unsupported dist_type")
+
+        nparam = len(scores)
         # length
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
             mask = mask.unsqueeze(1)
-            scores.data.masked_fill_(1-mask, self.mask_val)
-
+            for i in range(nparam):
+                scores[i].data.masked_fill_(1-mask, self.mask_val)
         return scores
 
 class RNNDecoderBase(nn.Module):
@@ -285,7 +340,7 @@ class RNNDecoderBase(nn.Module):
                  hidden_size, attn_type="general",
                  coverage_attn=False, context_gate=None,
                  copy_attn=False, dropout=0.0, embeddings=None,
-                 reuse_copy_attn=False):
+                 reuse_copy_attn=False, dist_type="log_normal"):
         super(RNNDecoderBase, self).__init__()
 
         # Basic attributes.
@@ -295,6 +350,7 @@ class RNNDecoderBase(nn.Module):
         self.hidden_size = hidden_size
         self.embeddings = embeddings
         self.dropout = nn.Dropout(dropout)
+        self.dist_type = dist_type
 
         # Build the RNN.
         self.rnn = self._build_rnn(rnn_type,
@@ -315,7 +371,8 @@ class RNNDecoderBase(nn.Module):
         self._coverage = coverage_attn
         self.attn = onmt.modules.GlobalAttention(
             hidden_size, coverage=coverage_attn,
-            attn_type=attn_type
+            attn_type=attn_type,
+            dist_type = dist_type
         )
 
         # Set up a separated copy attention layer, if needed.
@@ -470,7 +527,8 @@ class StdRNNDecoder(RNNDecoderBase):
                 decoder_outputs.view(tgt_len, tgt_batch, self.hidden_size)
 
         decoder_outputs = self.dropout(decoder_outputs)
-        assert p_a_scores.size() == (tgt_batch, tgt_len, src_len)
+        for p_a_score in p_a_scores:
+            assert p_a_score.size() == (tgt_batch, tgt_len, src_len)
 
         return decoder_final, decoder_outputs, attns, p_a_scores
 
@@ -526,8 +584,13 @@ class InputFeedRNNDecoder(RNNDecoderBase):
         aeq(tgt_batch, input_feed_batch)
         # END Additional args check.
 
-        p_a_scores = []  # batch x tgt_len x src_len
-
+        if self.dist_type == "dirichlet":
+            p_a_scores = [[]]
+        elif self.dist_type == "log_normal":
+            p_a_scores = [[], []]
+        else:
+            p_a_scores = [[]]
+        n_param = len(p_a_scores)
         # Initialize local and return variables.
         decoder_outputs = []
         attns = {"std": []}
@@ -566,9 +629,11 @@ class InputFeedRNNDecoder(RNNDecoderBase):
                 q_scores_sample=q_sample)
 
             # raw_scores: [batch x tgt_len x src_len]
-            assert raw_scores.size() == (batch_size, 1, src_len)
+            #assert raw_scores.size() == (batch_size, 1, src_len)
 
-            p_a_scores += [raw_scores]
+            assert len(raw_scores) == n_param
+            for i in range(n_param):
+                p_a_scores[i] += [raw_scores[i]]
             if self.context_gate is not None:
                 # TODO: context gate should be employed
                 # instead of second RNN transform.
@@ -596,19 +661,14 @@ class InputFeedRNNDecoder(RNNDecoderBase):
                 attns["copy"] += [copy_attn]
             elif self._copy:
                 attns["copy"] = attns["std"]
-        # Return result.
-        p_a_scores = torch.cat(p_a_scores, dim=1)
 
-        # Prior stuff, only if stochastic?
-        #p_a_scores = p_a_scores - p_a_scores.min(-1)[0].unsqueeze(-1) + 1e-2
-        #p_a_scores = p_a_scores.clamp(-1,1).exp()
-        #p_a_scores = p_a_scores.clamp(min=1e-2)
-        
+        for i in range(n_param):
+            p_a_scores[i] = torch.cat(p_a_scores[i],dim=1)
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)
             mask = mask.unsqueeze(1)
-            p_a_scores.data.masked_fill_(1-mask, 1e-2)
-        assert p_a_scores.size() == (batch_size, tgt_len, src_len)
+            for i in range(n_param):
+                p_a_scores[i].data.masked_fill_(1-mask, 1e-2)
         return hidden, decoder_outputs, attns, p_a_scores
 
     def _build_rnn(self, rnn_type, input_size,
@@ -640,13 +700,13 @@ class NMTModel(nn.Module):
       decoder (:obj:`RNNDecoderBase`): a decoder object
       multi<gpu (bool): setup for multigpu support
     """
-    def __init__(self, encoder, decoder, inference_network, stochastic=False, multigpu=False):
+    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="log_normal"):
         self.multigpu = multigpu
         super(NMTModel, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.inference_network = inference_network
-        self.stochastic = stochastic
+        self.dist_type = dist_type
 
     def forward(self, src, tgt, lengths, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
@@ -672,22 +732,28 @@ class NMTModel(nn.Module):
 
         tgt = tgt[:-1]  # exclude last target from inputs
         tgt_length, batch_size, rnn_size = tgt.size()
-        KL_losses = Variable(torch.zeros(batch_size))
 
         enc_final, memory_bank = self.encoder(src, lengths)
-        enc_state = \
-            self.decoder.init_decoder_state(src, memory_bank, enc_final)
+        enc_state = self.decoder.init_decoder_state(
+            src, memory_bank, enc_final)
         if self.inference_network is not None:
             # inference network q(z|x,y)
             q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
-            src_length = q_scores.size(2)
-            if self.stochastic:
-                q_scores = q_scores.view(-1, q_scores.size(2)) # batch_size*tgt_length, src_length
-                m = torch.distributions.Dirichlet(q_scores.cpu())
-                #if q_scores.max() < 0.1: import pdb; pdb.set_trace()
+            q_nparam = len(q_scores)
+            src_length = q_scores[0].size(2)
+            if self.dist_type != "none":
+                for i in range(q_nparam):
+                    q_scores[i] = q_scores[i].view(-1, q_scores[i].size(2)) # batch_size * tgt_length, src_length
+                if self.dist_type == "dirichlet":
+                    m = torch.distributions.Dirichlet(q_scores[0].cpu())
+                elif self.dist_type == "log_normal":
+                    m = torch.distributions.log_normal.LogNormal(q_scores[0], q_scores[1])
+                else:
+                    raise Exception("Unsupported dist_type")
                 q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
             else:
-                q_scores_sample = F.softmax(q_scores, dim=-1).transpose(0, 1)
+                # index into q_scores...?
+                q_scores_sample = F.softmax(q_scores[0], dim=-1).transpose(0, 1)
         else:
             q_scores = None
             q_scores_sample = None
@@ -697,24 +763,28 @@ class NMTModel(nn.Module):
                          else dec_state,
                          memory_lengths=lengths,
                          q_scores_sample=q_scores_sample)
+
         if self.multigpu:
             # Not yet supported on multi-gpu
             dec_state = None
             attns = None
 
         if self.inference_network is not None:
-            q_return = q_scores if self.stochastic else q_scores_sample.contiguous()
-            return (
-                decoder_outputs, attns, dec_state,
-                (
-                    q_return.view(batch_size, tgt_length, src_length),
-                    p_a_scores,
-                ),
-            )
+            for i in range(q_nparam):
+                q_scores[i] = q_scores[i].view(batch_size, tgt_length, src_length)
+            if self.dist_type == "dirichlet":
+                return decoder_outputs, attns, dec_state,\
+                   (q_scores[0], p_a_scores[0])
+            elif self.dist_type == "log_normal":
+                return decoder_outputs, attns, dec_state,\
+                   (q_scores[0], q_scores[1], p_a_scores[0], p_a_scores[1])
+            else:
+                # sigh, lol. this whole thing needs to be cleaned up
+                return decoder_outputs, attns, dec_state, (
+                    q_scores_sample.transpose(0,1), p_a_scores[0])
         else:
             return decoder_outputs, attns, dec_state, None
         # p_a_scores: feed in sampled a, output unormalized attention scores (batch_size, tgt_length, src_length)
-
 
 class DecoderState(object):
     """Interface for grouping together the current state of a recurrent
