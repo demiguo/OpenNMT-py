@@ -10,7 +10,8 @@ import onmt.io
 import onmt.Models
 import onmt.modules
 from onmt.Models import NMTModel, MeanEncoder, RNNEncoder, \
-                        StdRNNDecoder, InputFeedRNNDecoder, InferenceNetwork
+                        StdRNNDecoder, InputFeedRNNDecoder
+from onmt.ViModels import InferenceNetwork, ViInputFeedRNNDecoder, ViNMTModel
 from onmt.modules import Embeddings, ImageEncoder, CopyGenerator, \
                          TransformerEncoder, TransformerDecoder, \
                          CNNEncoder, CNNDecoder, AudioEncoder
@@ -90,8 +91,6 @@ def make_encoder(opt, embeddings):
 def make_inference_network(opt, src_embeddings, tgt_embeddings,
                            src_dict, src_feature_dicts,
                            tgt_dict, tgt_feature_dicts):
-    if opt.inference_network_type == "none":
-        return None
     print ('Making inference network:')
     if not opt.inference_network_share_embeddings:
         print ('    * share embeddings: False')
@@ -241,10 +240,16 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
         model_opt,
         src_embeddings, tgt_embeddings,
         src_dict, src_feature_dicts,
-        tgt_dict, tgt_feature_dicts)
+        tgt_dict, tgt_feature_dicts
+    ) if model_opt.inference_network_type != "none" else None
 
     # Make NMTModel(= encoder + decoder + inference network).
-    model = NMTModel(encoder, decoder, inference_network, dist_type=model_opt.dist_type)
+    model = (
+        NMTModel(encoder, decoder, None, "none")
+        if inference_network is None
+        else ViNMTModel(
+            encoder, decoder, inference_network, dist_type=model_opt.dist_type)
+    )
     model.model_type = model_opt.model_type
 
     # Make Generator.

@@ -261,7 +261,7 @@ class NMTLossCompute(LossComputeBase):
         
         if q_scores_0 is None or p_a_scores_0 is None:
             loss = xent
-            kl = torch.Tensor([0])
+            kl = xent.new([0])
         elif self.dist_type == "dirichlet":
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
             p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
