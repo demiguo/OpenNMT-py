@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from onmt.Utils import aeq, sequence_mask
 
 
-class GlobalAttention(nn.Module):
+class VariationalAttention(nn.Module):
     """
     Global attention takes a matrix and a query vector. It
     then computes a parameterized convex combination of the matrix
@@ -58,21 +59,20 @@ class GlobalAttention(nn.Module):
        attn_type (str): type of attention to use, options [dot,general,mlp]
 
     """
-    def __init__(self, dim, coverage=False, attn_type="dot", dist_type="log_normal"):
-        super(GlobalAttention, self).__init__()
+    def __init__(
+        self, dim,
+        dist_type="log_normal",
+        use_prior=False
+    ):
+        super(VariationalAttention, self).__init__()
 
+        # attn type is always general
+        # no coverage crap
         self.dim = dim
-        self.attn_type = attn_type
         self.dist_type = dist_type
-        assert (self.attn_type in ["dot", "general", "mlp"]), (
-                "Please select a valid attention type.")
+        self.use_prior = use_prior
 
-        if self.attn_type == "general":
-            self.linear_in = nn.Linear(dim, dim, bias=False)
-        elif self.attn_type == "mlp":
-            self.linear_context = nn.Linear(dim, dim, bias=False)
-            self.linear_query = nn.Linear(dim, dim, bias=True)
-            self.v = nn.Linear(dim, 1, bias=False)
+        self.linear_in = nn.Linear(dim, dim, bias=False)
 
         if self.dist_type == "log_normal":
             self.linear_1 = nn.Linear(dim + dim, 100)
@@ -81,14 +81,11 @@ class GlobalAttention(nn.Module):
             self.mean_out = nn.Linear(100, 1)
             self.var_out = nn.Linear(100, 1)
         # mlp wants it with bias
-        out_bias = self.attn_type == "mlp"
+        out_bias = False
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
 
         self.sm = nn.Softmax(dim=1)
         self.tanh = nn.Tanh()
-
-        if coverage:
-            self.linear_cover = nn.Linear(1, dim, bias=False)
 
     def score(self, h_t, h_s):
         """
@@ -110,28 +107,12 @@ class GlobalAttention(nn.Module):
         aeq(src_dim, tgt_dim)
         aeq(self.dim, src_dim)
 
-        if self.attn_type in ["general", "dot"]:
-            if self.attn_type == "general":
-                h_t_ = h_t.view(tgt_batch*tgt_len, tgt_dim)
-                h_t_ = self.linear_in(h_t_)
-                h_t = h_t_.view(tgt_batch, tgt_len, tgt_dim)
-            h_s_ = h_s.transpose(1, 2)
-            # (batch, t_len, d) x (batch, d, s_len) --> (batch, t_len, s_len)
-            return torch.bmm(h_t, h_s_)
-        else:
-            dim = self.dim
-            wq = self.linear_query(h_t.view(-1, dim))
-            wq = wq.view(tgt_batch, tgt_len, 1, dim)
-            wq = wq.expand(tgt_batch, tgt_len, src_len, dim)
-
-            uh = self.linear_context(h_s.contiguous().view(-1, dim))
-            uh = uh.view(src_batch, 1, src_len, dim)
-            uh = uh.expand(src_batch, tgt_len, src_len, dim)
-
-            # (batch, t_len, s_len, d)
-            wquh = self.tanh(wq + uh)
-
-            return self.v(wquh.view(-1, dim)).view(tgt_batch, tgt_len, src_len)
+        h_t_ = h_t.view(tgt_batch*tgt_len, tgt_dim)
+        h_t_ = self.linear_in(h_t_)
+        h_t = h_t_.view(tgt_batch, tgt_len, tgt_dim)
+        h_s_ = h_s.transpose(1, 2)
+        # (batch, t_len, d) x (batch, d, s_len) --> (batch, t_len, s_len)
+        return torch.bmm(h_t, h_s_)
 
     def get_raw_scores(self, h_t, h_s):
         """
@@ -171,7 +152,7 @@ class GlobalAttention(nn.Module):
         Returns:
           (`FloatTensor`, `FloatTensor`):
 
-          * Computed vector `[tgt_len x batch x dim]`
+          * Weighted context vector `[tgt_len x batch x dim]`
           * Attention distribtutions for each query
              `[tgt_len x batch x src_len]`
           * Unormalized attention scores for each query 
@@ -192,15 +173,6 @@ class GlobalAttention(nn.Module):
         aeq(batch, batch_)
         aeq(dim, dim_)
         aeq(self.dim, dim)
-        if coverage is not None:
-            batch_, sourceL_ = coverage.size()
-            aeq(batch, batch_)
-            aeq(sourceL, sourceL_)
-
-        if coverage is not None:
-            cover = coverage.view(-1).unsqueeze(1)
-            memory_bank += self.linear_cover(cover).view_as(memory_bank)
-            memory_bank = self.tanh(memory_bank)
 
         # compute attention scores, as in Luong et al.
         #align = self.score(input, memory_bank)
@@ -218,30 +190,30 @@ class GlobalAttention(nn.Module):
             raw_scores = self.get_raw_scores(input, memory_bank)
         else:
             raw_scores = [align]
+
         if q_scores_sample is None:
             align_vectors = self.sm(align.view(batch*targetL, sourceL))
             align_vectors = align_vectors.view(batch, targetL, sourceL)
         else:
+            # sample from the prior
             m = torch.distributions.Dirichlet(
                 align.view(batch*targetL, sourceL)
-                    .clamp(-0.1, 5).exp().cpu()
+                    .clamp(1e-2, 5).exp().cpu()
             )
             align_vectors = m.rsample().cuda().view(batch, targetL, -1)
 
         # each context vector c_t is the weighted average
         # over all the source hidden states
-        if q_scores_sample is None:
+        if q_scores_sample is None or self.use_prior:
             c = torch.bmm(align_vectors, memory_bank)
         else:
-            c = torch.bmm(align_vectors, memory_bank)
-            #c = torch.bmm(q_scores_sample, memory_bank)
+            c = torch.bmm(q_scores_sample, memory_bank)
         # what is size of q_scores_sample? batch, targetL, sourceL
 
         # concatenate
         concat_c = torch.cat([c, input], 2).view(batch*targetL, dim*2)
         attn_h = self.linear_out(concat_c).view(batch, targetL, dim)
-        if self.attn_type in ["general", "dot"]:
-            attn_h = self.tanh(attn_h)
+        attn_h = self.tanh(attn_h)
 
         if one_step:
             attn_h = attn_h.squeeze(1)
@@ -268,4 +240,7 @@ class GlobalAttention(nn.Module):
             aeq(batch, batch_)
             aeq(sourceL, sourceL_)
 
+        # attn_h: convex combination of memory_bank
+        # align_vectors: convex coefficients / boltzmann dist
+        # raw_scores: unnormalized scores
         return attn_h, align_vectors, raw_scores

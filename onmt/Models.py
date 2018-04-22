@@ -188,7 +188,7 @@ class RNNEncoder(EncoderBase):
             outs = bottle_hidden(self.bridge[0], hidden)
         return outs
 
-class InferenceNetwork(nn.Module):
+class InferenceNetworkDeprecated(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
                  rnn_type, src_layers, tgt_layers, rnn_size, dropout,
                  dist_type="none"):
@@ -266,9 +266,9 @@ class InferenceNetwork(nn.Module):
             scores = torch.bmm(tgt_memory_bank, src_memory_bank)
             #print("max: {}, min: {}".format(scores.max(), scores.min()))
             # affine
-            scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
+            #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
             # exp
-            #scores = scores.clamp(-1, 1).exp()
+            scores = scores.clamp(-0.1, 5).exp()
             #scores = scores.clamp(min=1e-2)
             scores = [scores]
         elif self.dist_type == "log_normal":

@@ -102,6 +102,14 @@ def model_opts(parser):
     group.add_argument("-freeze_generative_model", type=int, default=0,
                        help="""Freeze the generative model, except the attn prior.
                        """)
+    group.add_argument("-use_generative_model", type=int, default=0,
+                       help="""Use the generative model, namely the attn prior,
+                       instead of the inference network for the attention.
+                       """)
+    group.add_argument("-min_clamp_val", type=float, default=1e-2,
+                       help="""Use the generative model, namely the attn prior,
+                       instead of the inference network for the attention.
+                       """)
     group.add_argument("-dist_type", type=str, default="log_normal",
                         choices=["log_normal", "dirichlet", "none"],
                         help="""q and p_a distribution type.

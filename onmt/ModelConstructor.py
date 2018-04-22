@@ -11,7 +11,7 @@ import onmt.Models
 import onmt.modules
 from onmt.Models import NMTModel, MeanEncoder, RNNEncoder, \
                         StdRNNDecoder, InputFeedRNNDecoder
-from onmt.ViModels import InferenceNetwork, ViInputFeedRNNDecoder, ViNMTModel
+from onmt.ViModels import InferenceNetwork, ViRNNDecoder, ViNMTModel
 from onmt.modules import Embeddings, ImageEncoder, CopyGenerator, \
                          TransformerEncoder, TransformerDecoder, \
                          CNNEncoder, CNNDecoder, AudioEncoder
@@ -141,7 +141,7 @@ def make_decoder(opt, embeddings):
                           opt.global_attention, opt.copy_attn,
                           opt.cnn_kernel_width, opt.dropout,
                           embeddings)
-    elif opt.input_feed:
+    elif opt.input_feed and opt.inference_network_type == "none":
         print("input feed")
         return InputFeedRNNDecoder(opt.rnn_type, opt.brnn,
                                    opt.dec_layers, opt.rnn_size,
@@ -153,6 +153,21 @@ def make_decoder(opt, embeddings):
                                    embeddings,
                                    opt.reuse_copy_attn,
                                    opt.dist_type)
+    elif opt.input_feed and opt.inference_network_type != "none":
+        print("variational decoder")
+        return ViRNNDecoder(
+            opt.rnn_type, opt.brnn,
+            opt.dec_layers, opt.rnn_size,
+            opt.global_attention,
+            opt.coverage_attn,
+            opt.context_gate,
+            opt.copy_attn,
+            opt.dropout,
+            embeddings,
+            opt.reuse_copy_attn,
+            dist_type = opt.dist_type,
+            use_prior = opt.use_generative_model > 0,
+        )
     else:
         return StdRNNDecoder(opt.rnn_type, opt.brnn,
                              opt.dec_layers, opt.rnn_size,

@@ -77,6 +77,7 @@ else:
     # And attention scores
     nlls = torch.FloatTensor(len(valid))
     attns = []
+    q_attns = []
     wordnlls = []
     for i, example in tqdm(enumerate(valid)):
         if i > 5:
@@ -86,8 +87,8 @@ else:
 
         if True:
             output, attn_dict, decoderstate, (q_scores, p_a_scores) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
-            #attn = attn_dict["std"]
-            attn = attn_dict["q"]
+            attn = attn_dict["std"]
+            q_attn = attn_dict["q"]
             #import pdb; pdb.set_trace()
 
             lsm = model.generator(output.squeeze(1))
@@ -96,6 +97,7 @@ else:
 
             nlls[i] = bloss.mean().data[0]
             attns.append(attn)
+            q_attns.append(q_attn)
             wordnlls.append(bloss)
 
     """
@@ -122,7 +124,35 @@ def visualize_attn():
         rownames = ["[{}] {} ({:.2f})".format(i, name, wordnll[i].data[0]) for i, name in enumerate(rownames)]
         columnnames = list(example.src)
         columnnames = ["[{}] {}".format(i, name) for i, name in enumerate(columnnames)]
-        title = "Model {} Example {}".format(args.checkpoint_path.split("/")[-2], i)
+        title = "Gen Model {} Example {}".format(args.checkpoint_path.split("/")[-2], i)
+        vis.heatmap(
+            X=attn.data.cpu().squeeze(),
+            opts=dict(
+                rownames=rownames,
+                columnnames=columnnames,
+                colormap="Hot",
+                title=title,
+                width=750,
+                height=750,
+                marginleft=150,
+                marginright=150,
+                margintop=150,
+                marginbottom=150
+            ),
+            win=title
+        )
+
+        attn = q_attns[i]
+
+        # unused
+        nll = nlls[i]
+        wordnll = wordnlls[i]
+
+        rownames = list(example.tgt) + ["<eos>"]
+        rownames = ["[{}] {} ({:.2f})".format(i, name, wordnll[i].data[0]) for i, name in enumerate(rownames)]
+        columnnames = list(example.src)
+        columnnames = ["[{}] {}".format(i, name) for i, name in enumerate(columnnames)]
+        title = "Inf Net {} Example {}".format(args.checkpoint_path.split("/")[-2], i)
         vis.heatmap(
             X=attn.data.cpu().squeeze(),
             opts=dict(

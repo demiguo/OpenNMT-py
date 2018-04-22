@@ -268,12 +268,10 @@ class NMTLossCompute(LossComputeBase):
             q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
             p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
 
-            q_dist = torch.distributions.Dirichlet(q_scores_0.detach())
-            p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.detach())
+            q_dist = torch.distributions.Dirichlet(q_scores_0)
+            p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.clamp(1e-2, 5).exp().detach())
             kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
-            #loss += kl
-            loss = xent # + kl
         elif self.dist_type == "log_normal":
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
             p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))

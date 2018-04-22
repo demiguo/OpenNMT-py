@@ -91,9 +91,9 @@ class InferenceNetwork(nn.Module):
             scores = torch.bmm(tgt_memory_bank, src_memory_bank)
             #print("max: {}, min: {}".format(scores.max(), scores.min()))
             # affine
-            scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
+            #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
             # exp
-            #scores = scores.clamp(-1, 1).exp()
+            scores = scores.clamp(1e-2, 5).exp()
             #scores = scores.clamp(min=1e-2)
             scores = [scores]
         elif self.dist_type == "log_normal":
@@ -116,7 +116,7 @@ class InferenceNetwork(nn.Module):
         return scores
 
 
-class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
+class ViRNNDecoder(InputFeedRNNDecoder):
     """
     Input feeding based decoder. See :obj:`RNNDecoderBase` for options.
 
@@ -142,6 +142,16 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
           E --> H
           G --> H
     """
+    def __init__(self, *args, **kwargs):
+        # lol, fucking mess
+        use_prior = kwargs.pop("use_prior")
+        super(ViRNNDecoder, self).__init__(*args, **kwargs)
+        # lol.
+        self.attn = onmt.modules.VariationalAttention(
+            dim       = self.hidden_size,
+            dist_type = kwargs["dist_type"],
+            use_prior = use_prior,
+        )
 
     def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None,
                           q_scores_sample=None):
