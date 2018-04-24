@@ -106,6 +106,10 @@ def model_opts(parser):
                        help="""Use the generative model, namely the attn prior,
                        instead of the inference network for the attention.
                        """)
+    group.add_argument("-input_feed_prior", type=int, default=0,
+                       help="""Always perform input feeding with the prior P
+                       rather than approximate posterior Q even during training.
+                       """)
     group.add_argument("-min_clamp_val", type=float, default=1e-2,
                        help="""Use the generative model, namely the attn prior,
                        instead of the inference network for the attention.

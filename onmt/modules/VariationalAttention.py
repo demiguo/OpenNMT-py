@@ -185,22 +185,27 @@ class VariationalAttention(nn.Module):
 
         # Softmax to normalize attention weights
         if self.dist_type == "dirichlet":
+            align = align.clamp(1e-2, 5).exp()
             raw_scores = [align]
         elif self.dist_type == "log_normal":
             raw_scores = self.get_raw_scores(input, memory_bank)
         else:
             raw_scores = [align]
 
-        if q_scores_sample is None:
+        if q_scores_sample is None or self.dist_type == "none":
             align_vectors = self.sm(align.view(batch*targetL, sourceL))
             align_vectors = align_vectors.view(batch, targetL, sourceL)
         else:
             # sample from the prior
             m = torch.distributions.Dirichlet(
-                align.view(batch*targetL, sourceL)
-                    .clamp(1e-2, 5).exp().cpu()
+                align
+                    #.masked_fill(1-mask, float("-inf"))
+                    .view(batch*targetL, sourceL)
+                    .cpu()
             )
-            align_vectors = m.rsample().cuda().view(batch, targetL, -1)
+            align_vectors = m.rsample().cuda(align.get_device()).view(batch, targetL, -1)
+            # if we're zeroing out the approximate posterior, wait what?
+            #align_vectors = align_vectors.masked_fill(1-mask, 0)
 
         # each context vector c_t is the weighted average
         # over all the source hidden states
@@ -244,3 +249,10 @@ class VariationalAttention(nn.Module):
         # align_vectors: convex coefficients / boltzmann dist
         # raw_scores: unnormalized scores
         return attn_h, align_vectors, raw_scores
+
+    # @overload
+    def train(self, mode=True):
+        # use the generative model during evaluation (mode=False)
+        self.use_prior = not mode
+        super(VariationalAttention, self).train(mode)
+

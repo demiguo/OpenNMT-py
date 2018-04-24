@@ -33,6 +33,7 @@ def get_args():
     args.add_argument("--modelname", type=str, default=None, required=True)
     args.add_argument("--devid", type=int, default=-1)
     args.add_argument("--worstn", type=int, default=10)
+    args.add_argument("--port", type=int, default=8097)
     return args.parse_args()
 
 
@@ -61,7 +62,7 @@ checkpoint = torch.load(
     map_location=lambda storage, loc: storage)
 model_opt = checkpoint['opt']
 model = onmt.ModelConstructor.make_base_model(model_opt, fields, devid, checkpoint)
-model.cuda() # lol
+#model.cuda(args.devid) # lol
 
 nlls = None
 attns = None
@@ -86,7 +87,9 @@ else:
         y = tgtfield.process([example.tgt], device=devid, train=False)
 
         if True:
-            output, attn_dict, decoderstate, (q_scores, p_a_scores) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
+            #output, attn_dict, decoderstate, (q_scores, p_a_scores) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
+            output, attn_dict, decoderstate, (q_scores, p_a_scores) = model(
+                x[0].view(-1, 1, 1).cpu(), y.view(-1, 1, 1).cpu(), x[1].cpu())
             attn = attn_dict["std"]
             q_attn = attn_dict["q"]
             #import pdb; pdb.set_trace()
@@ -109,7 +112,7 @@ else:
 
 def visualize_attn():
     import visdom
-    vis = visdom.Visdom()
+    vis = visdom.Visdom(port=args.port)
     #for i in np.random.permutation(len(valid))[:5]:
     #for i in [3105, 2776, 2424, 2357, 1832]:
     for i in [0, 1, 2, 3]:

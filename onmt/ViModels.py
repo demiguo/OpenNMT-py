@@ -333,7 +333,7 @@ class ViNMTModel(nn.Module):
                     m = torch.distributions.log_normal.LogNormal(q_scores[0], q_scores[1])
                 else:
                     raise Exception("Unsupported dist_type")
-                q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
+                q_scores_sample = m.rsample().cuda(q_scores[0].get_device()).view(batch_size, tgt_length, -1).transpose(0,1)
             else:
                 q_scores_sample = F.softmax(q_scores[0], dim=-1).transpose(0, 1)
         else:
@@ -362,6 +362,7 @@ class ViNMTModel(nn.Module):
                    (q_scores[0], q_scores[1], p_a_scores[0], p_a_scores[1])
             elif self.dist_type == "none":
                 # sigh, lol. this whole thing needs to be cleaned up
+                # q_scores is the unnormalized score, and the sample is normalized
                 return decoder_outputs, attns, dec_state, (
                     q_scores_sample.transpose(0,1), p_a_scores[0])
             else:

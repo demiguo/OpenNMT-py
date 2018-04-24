@@ -13,6 +13,8 @@ import torch.nn.functional as F
 import onmt
 import onmt.io
 
+from onmt.Utils import sequence_mask
+
 
 class LossComputeBase(nn.Module):
     """
@@ -245,6 +247,7 @@ class NMTLossCompute(LossComputeBase):
                       q_scores_0=None, p_a_scores_0=None, q_scores_1=None, p_a_scores_1=None):
         # TODO(demi): understand how sharding work and make sure "additional loss" works
         scores = self.generator(self._bottle(output))
+        bsz = len(batch.indices)
 
         gtruth = target.view(-1)
         if self.confidence < 1:
@@ -263,14 +266,37 @@ class NMTLossCompute(LossComputeBase):
             loss = xent
             kl = xent.new([0])
         elif self.dist_type == "dirichlet":
+            # T x N x S
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
             p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
-            q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
-            p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
+            mask = gtruth.ne(self.padding_idx)
+            #q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
+            #p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
 
-            q_dist = torch.distributions.Dirichlet(q_scores_0)
-            p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.clamp(1e-2, 5).exp().detach())
+            q_dist = torch.distributions.Dirichlet(q_scores_0[mask])
+            p_a_dist = torch.distributions.Dirichlet(p_a_scores_0[mask])
             kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+            #print("analytic kl: {}".format(akl.item()))
+
+            #q_dist = torch.distributions.Dirichlet(q_scores_0.cpu())
+            #p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.cpu())
+            q_dist = torch.distributions.Dirichlet(q_scores_0[mask].cpu())
+            p_a_dist = torch.distributions.Dirichlet(p_a_scores_0[mask].cpu())
+            # sample KL
+            n_samples = 1
+            q_samples = q_dist.rsample(torch.Size([n_samples]))
+            #p_samples = p_a_dist.rsample(torch.Size([n_samples]))
+            Hq = -q_dist.log_prob(q_samples)
+            Xp = -p_a_dist.log_prob(q_samples)
+            ln = -Hq + Xp
+            lens = batch.src[1]
+            #F.kl_div(p_samples.squeeze().log(), q_samples.squeeze().detach(), size_average=False) / gtruth.nelement()
+            #kl = F.kl_div(p_samples.squeeze().log(), q_samples.squeeze().detach(), size_average=False) / mask.int().sum()
+            #kl = kl.cuda()
+            #kl = ln.sum().cuda()
+            #print("approximate kl: {}".format(kl.item()))
+            #import pdb; pdb.set_trace()
+
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
         elif self.dist_type == "log_normal":
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
@@ -296,9 +322,20 @@ class NMTLossCompute(LossComputeBase):
             q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
             p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
 
-            q_dist = torch.distributions.Categorical(q_scores_0)
-            p_a_dist = torch.distributions.Categorical(p_a_scores_0)
-            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+            #q_dist = torch.distributions.Categorical(q_scores_0)
+            #p_a_dist = torch.distributions.Categorical(p_a_scores_0)
+            #kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+
+            #print(kl.item(),(gtruth != 1).int().sum().item())
+            #akl = (kl / (gtruth != 1).int().sum()).item()
+            #print(akl)
+            #if p_a_scores_0.max() > 0.1:
+                #import pdb; pdb.set_trace()
+            #if q_scores_0.max() > 0.1:
+                #import pdb; pdb.set_trace()
+            #kl = (F.log_softmax(q_scores_0, dim=-1) - F.log_softmax(p_a_scores_0, dim=-1)).mean(-1).sum()
+            # abs...?
+            kl = (F.log_softmax(q_scores_0, dim=-1) - F.log_softmax(p_a_scores_0, dim=-1)).abs().mean(-1).sum()
         else:
             raise Exception("Unsupported dist_type")
 

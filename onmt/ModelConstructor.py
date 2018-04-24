@@ -310,8 +310,8 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
     model.generator = generator
 
     # Make the whole model leverage GPU if indicated to do so.
-    if gpu:
-        model.cuda()
+    if gpu >= 0:
+        model.cuda(model_opt.gpuid[0])
     else:
         model.cpu()
 
