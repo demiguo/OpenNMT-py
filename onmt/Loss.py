@@ -130,7 +130,7 @@ class LossComputeBase(nn.Module):
 
         return batch_stats
 
-    def _stats(self, loss, xent, kl, scores, target):
+    def _stats(self, loss, xent, kl, Hq, scores, target):
         """
         Args:
             loss (:obj:`FloatTensor`): the loss computed by the loss criterion.
@@ -149,6 +149,7 @@ class LossComputeBase(nn.Module):
             loss.cpu().numpy(),
             xent.cpu().numpy(),
             kl.cpu().numpy(),
+            Hq.cpu().numpy(),
             non_padding.long().sum().cpu().numpy(),
             num_correct.cpu().numpy())
 
@@ -167,6 +168,8 @@ class NMTLossCompute(LossComputeBase):
                  label_smoothing=0.0, dist_type="none"):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
+
+        self.alpha = None
 
         # TODO(demi): change this, add KL loss for inference network
         self.dist_type = dist_type
@@ -278,24 +281,29 @@ class NMTLossCompute(LossComputeBase):
             kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
             #print("analytic kl: {}".format(akl.item()))
 
-            #q_dist = torch.distributions.Dirichlet(q_scores_0.cpu())
-            #p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.cpu())
-            q_dist = torch.distributions.Dirichlet(q_scores_0[mask].cpu())
-            p_a_dist = torch.distributions.Dirichlet(p_a_scores_0[mask].cpu())
-            # sample KL
-            n_samples = 1
-            q_samples = q_dist.rsample(torch.Size([n_samples]))
-            #p_samples = p_a_dist.rsample(torch.Size([n_samples]))
-            Hq = -q_dist.log_prob(q_samples)
-            Xp = -p_a_dist.log_prob(q_samples)
-            ln = -Hq + Xp
-            lens = batch.src[1]
-            #F.kl_div(p_samples.squeeze().log(), q_samples.squeeze().detach(), size_average=False) / gtruth.nelement()
-            #kl = F.kl_div(p_samples.squeeze().log(), q_samples.squeeze().detach(), size_average=False) / mask.int().sum()
-            #kl = kl.cuda()
-            #kl = ln.sum().cuda()
-            #print("approximate kl: {}".format(kl.item()))
-            #import pdb; pdb.set_trace()
+            # LOL
+            Hq = q_dist.entropy().sum()
+
+            SAMPLE_KL = False
+            if SAMPLE_KL:
+                #q_dist = torch.distributions.Dirichlet(q_scores_0.cpu())
+                #p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.cpu())
+                q_dist = torch.distributions.Dirichlet(q_scores_0[mask].cpu())
+                p_a_dist = torch.distributions.Dirichlet(p_a_scores_0[mask].cpu())
+                # sample KL
+                n_samples = 1
+                q_samples = q_dist.rsample(torch.Size([n_samples]))
+                #p_samples = p_a_dist.rsample(torch.Size([n_samples]))
+                _Hq = -q_dist.log_prob(q_samples)
+                _Xp = -p_a_dist.log_prob(q_samples)
+                ln = -_Hq + _Xp
+                lens = batch.src[1]
+                #F.kl_div(p_samples.squeeze().log(), q_samples.squeeze().detach(), size_average=False) / gtruth.nelement()
+                #kl = F.kl_div(p_samples.squeeze().log(), q_samples.squeeze().detach(), size_average=False) / mask.int().sum()
+                #kl = kl.cuda()
+                kl = ln.mean(0).sum().cuda()
+                #print("approximate kl: {}".format(kl.item()))
+                #import pdb; pdb.set_trace()
 
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
         elif self.dist_type == "log_normal":
@@ -339,7 +347,15 @@ class NMTLossCompute(LossComputeBase):
         else:
             raise Exception("Unsupported dist_type")
 
-        loss = xent + kl
+        if self.alpha is not None:
+            loss = xent + self.alpha * kl
+        else:
+            loss = xent + kl
+
+        # testing generative model
+        TEST_GEN = False
+        if TEST_GEN:
+            loss = xent
 
         if self.confidence < 1:
             # Default: report smoothed ppl.
@@ -348,7 +364,9 @@ class NMTLossCompute(LossComputeBase):
         else:
             loss_data = loss.data.clone()
 
-        stats = self._stats(loss_data, xent.data.clone(), kl.data.clone(), scores.data, target.view(-1).data)
+        stats = self._stats(loss_data, xent.data.clone(), kl.data.clone(), Hq.data.clone(), scores.data, target.view(-1).data)
+
+        loss = loss
 
         return loss, stats
 

@@ -9,7 +9,7 @@ from torch.nn.utils.rnn import pad_packed_sequence as unpack
 
 import onmt
 from onmt.Utils import aeq, sequence_mask
-from onmt.Models import RNNEncoder, InputFeedRNNDecoder, NMTModel
+from onmt.Models import MeanEncoder, RNNEncoder, InputFeedRNNDecoder, NMTModel
 
 
 class InferenceNetwork(nn.Module):
@@ -17,6 +17,7 @@ class InferenceNetwork(nn.Module):
                  rnn_type, src_layers, tgt_layers, rnn_size, dropout,
                  dist_type="none"):
         super(InferenceNetwork, self).__init__()
+        self.inference_network_type = inference_network_type
         self.dist_type = dist_type
         if dist_type == "none":
             self.mask_val = float("-inf")
@@ -24,15 +25,15 @@ class InferenceNetwork(nn.Module):
             self.mask_val = 1e-2
 
         if inference_network_type == 'embedding_only':
-            self.src_encoder = src_embeddings
-            self.tgt_encoder = tgt_embeddings
+            self.src_encoder = MeanEncoder(src_layers, src_embeddings)
+            self.tgt_encoder = MeanEncoder(tgt_layers, tgt_embeddings)
         elif inference_network_type == 'brnn':
             self.src_encoder = RNNEncoder(rnn_type, True, src_layers, rnn_size,
                                           dropout, src_embeddings, False) 
             self.tgt_encoder = RNNEncoder(rnn_type, True, tgt_layers, rnn_size,
                                           dropout, tgt_embeddings, False) 
         elif inference_network_type == 'rnn':
-            self.src_encoder = RNNEncoder(rnn_type, False, src_layers, rnn_size,
+            self.src_encoder = RNNEncoder(rnn_type, True, src_layers, rnn_size,
                                           dropout, src_embeddings, False) 
             self.tgt_encoder = RNNEncoder(rnn_type, False, tgt_layers, rnn_size,
                                           dropout, tgt_embeddings, False) 
@@ -59,7 +60,6 @@ class InferenceNetwork(nn.Module):
         aeq(src_dim, tgt_dim)
         aeq(self.rnn_size, src_dim)
         
-        #import pdb; pdb.set_trace()
         h_t_expand = h_t.unsqueeze(2).expand(-1, -1, src_len, -1)
         h_s_expand = h_s.unsqueeze(1).expand(-1, tgt_len, -1, -1)
         # [batch, tgt_len, src_len, src_dim]
@@ -76,8 +76,11 @@ class InferenceNetwork(nn.Module):
         h_var = h_var.view(tgt_batch, tgt_len, src_len)
         return [h_mean, h_var]
 
-    def forward(self, src, tgt, src_lengths=None):
-        src_final, src_memory_bank = self.src_encoder(src, src_lengths)
+    def forward(self, src, tgt, src_lengths=None, src_precompute=None):
+        if src_precompute is None:
+            src_final, src_memory_bank = self.src_encoder(src, src_lengths)
+        else:
+            src_final, src_memory_bank = src_precompute
         src_length, batch_size, rnn_size = src_memory_bank.size()
         tgt_final, tgt_memory_bank = self.tgt_encoder(tgt)
         src_memory_bank = src_memory_bank.transpose(0,1) # batch_size, src_length, rnn_size
@@ -319,8 +322,14 @@ class ViNMTModel(nn.Module):
         enc_state = self.decoder.init_decoder_state(
             src, memory_bank, enc_final)
         if self.inference_network is not None:
+            SRC_PRECOMPUTE = True
             # inference network q(z|x,y)
-            q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
+            if SRC_PRECOMPUTE:
+                # enc_final is unused anyway, lol
+                src_precompute = (enc_final, memory_bank.detach())
+                q_scores = self.inference_network(src, tgt, lengths, src_precompute) 
+            else:
+                q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
             q_nparam = len(q_scores)
             src_length = q_scores[0].size(2)
             if self.dist_type != "none":
@@ -333,7 +342,9 @@ class ViNMTModel(nn.Module):
                     m = torch.distributions.log_normal.LogNormal(q_scores[0], q_scores[1])
                 else:
                     raise Exception("Unsupported dist_type")
-                q_scores_sample = m.rsample().cuda(q_scores[0].get_device()).view(batch_size, tgt_length, -1).transpose(0,1)
+                q_scores_sample = m.rsample().view(batch_size, tgt_length, -1).transpose(0,1)
+                if q_scores[0].is_cuda:
+                    q_scores_sample = q_scores_sample.cuda(q_scores[0].get_device())
             else:
                 q_scores_sample = F.softmax(q_scores[0], dim=-1).transpose(0, 1)
         else:

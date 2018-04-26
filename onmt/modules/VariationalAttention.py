@@ -203,13 +203,16 @@ class VariationalAttention(nn.Module):
                     .view(batch*targetL, sourceL)
                     .cpu()
             )
-            align_vectors = m.rsample().cuda(align.get_device()).view(batch, targetL, -1)
+            align_vectors = m.rsample().view(batch, targetL, -1)
+            if align.is_cuda:
+                align_vectors = align_vectors.cuda(align.get_device())
             # if we're zeroing out the approximate posterior, wait what?
             #align_vectors = align_vectors.masked_fill(1-mask, 0)
 
         # each context vector c_t is the weighted average
         # over all the source hidden states
-        if q_scores_sample is None or self.use_prior:
+        if q_scores_sample is None or self.use_prior or not self.training:
+            # use prior if we always use prior, or for evaluation
             c = torch.bmm(align_vectors, memory_bank)
         else:
             c = torch.bmm(q_scores_sample, memory_bank)
@@ -249,10 +252,3 @@ class VariationalAttention(nn.Module):
         # align_vectors: convex coefficients / boltzmann dist
         # raw_scores: unnormalized scores
         return attn_h, align_vectors, raw_scores
-
-    # @overload
-    def train(self, mode=True):
-        # use the generative model during evaluation (mode=False)
-        self.use_prior = not mode
-        super(VariationalAttention, self).train(mode)
-
