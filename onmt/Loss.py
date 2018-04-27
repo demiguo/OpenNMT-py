@@ -353,7 +353,7 @@ class NMTLossCompute(LossComputeBase):
             loss = xent + kl
 
         # testing generative model
-        TEST_GEN = False
+        TEST_GEN = True
         if TEST_GEN:
             loss = xent
 

@@ -82,7 +82,9 @@ class InferenceNetwork(nn.Module):
         else:
             src_final, src_memory_bank = src_precompute
         src_length, batch_size, rnn_size = src_memory_bank.size()
+
         tgt_final, tgt_memory_bank = self.tgt_encoder(tgt)
+
         src_memory_bank = src_memory_bank.transpose(0,1) # batch_size, src_length, rnn_size
         src_memory_bank = src_memory_bank.contiguous().view(-1, rnn_size) # batch_size*src_length, rnn_size
         src_memory_bank = self.W(src_memory_bank) \
@@ -323,13 +325,11 @@ class ViNMTModel(nn.Module):
             src, memory_bank, enc_final)
         if self.inference_network is not None:
             SRC_PRECOMPUTE = True
+            # enc_final is unused anyway, lol
+            src_precompute = (enc_final, memory_bank.detach()) if SRC_PRECOMPUTE else None
+
             # inference network q(z|x,y)
-            if SRC_PRECOMPUTE:
-                # enc_final is unused anyway, lol
-                src_precompute = (enc_final, memory_bank.detach())
-                q_scores = self.inference_network(src, tgt, lengths, src_precompute) 
-            else:
-                q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
+            q_scores = self.inference_network(src, tgt, lengths, src_precompute) # batch_size, tgt_length, src_length
             q_nparam = len(q_scores)
             src_length = q_scores[0].size(2)
             if self.dist_type != "none":
