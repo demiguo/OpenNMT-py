@@ -217,7 +217,7 @@ class InferenceNetwork(nn.Module):
         self.rnn_size = rnn_size
 
         # to parametrize log normal distribution
-        if self.dist_type == "log_normal":
+        if self.dist_type == "normal":
             # TODO(demi): make 100 configurable
             self.linear_1 = torch.nn.Linear(rnn_size + rnn_size, 100)
             self.linear_2 = torch.nn.Linear(100, 100)
@@ -225,7 +225,7 @@ class InferenceNetwork(nn.Module):
             self.var_out = torch.nn.Linear(100, 1)
             self.softplus = torch.nn.Softplus()
 
-    def get_log_normal_scores(self, h_s, h_t):
+    def get_normal_scores(self, h_s, h_t):
         """ h_s: [batch x src_length x rnn_size]
             h_t: [batch x tgt_length x rnn_size]
         """
@@ -271,11 +271,11 @@ class InferenceNetwork(nn.Module):
             #scores = scores.clamp(-1, 1).exp()
             #scores = scores.clamp(min=1e-2)
             scores = [scores]
-        elif self.dist_type == "log_normal":
+        elif self.dist_type == "normal":
             # log normal
             src_memory_bank = src_memory_bank.transpose(1, 2)
             assert src_memory_bank.size() == (batch_size, src_length, rnn_size)
-            scores = self.get_log_normal_scores(src_memory_bank, tgt_memory_bank)
+            scores = self.get_normal_scores(src_memory_bank, tgt_memory_bank)
         elif self.dist_type == "none":
             scores = [torch.bmm(tgt_memory_bank, src_memory_bank)]
         else:
@@ -340,7 +340,7 @@ class RNNDecoderBase(nn.Module):
                  hidden_size, attn_type="general",
                  coverage_attn=False, context_gate=None,
                  copy_attn=False, dropout=0.0, embeddings=None,
-                 reuse_copy_attn=False, dist_type="log_normal"):
+                 reuse_copy_attn=False, dist_type="normal"):
         super(RNNDecoderBase, self).__init__()
 
         # Basic attributes.
@@ -586,7 +586,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
 
         if self.dist_type == "dirichlet":
             p_a_scores = [[]]
-        elif self.dist_type == "log_normal":
+        elif self.dist_type == "normal":
             p_a_scores = [[], []]
         else:
             p_a_scores = [[]]
@@ -700,7 +700,7 @@ class NMTModel(nn.Module):
       decoder (:obj:`RNNDecoderBase`): a decoder object
       multi<gpu (bool): setup for multigpu support
     """
-    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="log_normal"):
+    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="normal"):
         self.multigpu = multigpu
         super(NMTModel, self).__init__()
         self.encoder = encoder
@@ -746,8 +746,8 @@ class NMTModel(nn.Module):
                     q_scores[i] = q_scores[i].view(-1, q_scores[i].size(2)) # batch_size * tgt_length, src_length
                 if self.dist_type == "dirichlet":
                     m = torch.distributions.Dirichlet(q_scores[0].cpu())
-                elif self.dist_type == "log_normal":
-                    m = torch.distributions.log_normal.LogNormal(q_scores[0], q_scores[1])
+                elif self.dist_type == "normal":
+                    m = torch.distributions.normal.LogNormal(q_scores[0], q_scores[1])
                 else:
                     raise Exception("Unsupported dist_type")
                 q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
@@ -775,7 +775,7 @@ class NMTModel(nn.Module):
             if self.dist_type == "dirichlet":
                 return decoder_outputs, attns, dec_state,\
                    (q_scores[0], p_a_scores[0])
-            elif self.dist_type == "log_normal":
+            elif self.dist_type == "normal":
                 return decoder_outputs, attns, dec_state,\
                    (q_scores[0], q_scores[1], p_a_scores[0], p_a_scores[1])
             else:

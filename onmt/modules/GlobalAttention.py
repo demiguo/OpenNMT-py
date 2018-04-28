@@ -58,7 +58,7 @@ class GlobalAttention(nn.Module):
        attn_type (str): type of attention to use, options [dot,general,mlp]
 
     """
-    def __init__(self, dim, coverage=False, attn_type="dot", dist_type="log_normal"):
+    def __init__(self, dim, coverage=False, attn_type="dot", dist_type="normal"):
         super(GlobalAttention, self).__init__()
 
         self.dim = dim
@@ -74,7 +74,7 @@ class GlobalAttention(nn.Module):
             self.linear_query = nn.Linear(dim, dim, bias=True)
             self.v = nn.Linear(dim, 1, bias=False)
 
-        if self.dist_type == "log_normal":
+        if self.dist_type == "normal":
             self.linear_1 = nn.Linear(dim + dim, 100)
             self.linear_2 = nn.Linear(100, 100)
             self.softplus = torch.nn.Softplus()
@@ -214,7 +214,7 @@ class GlobalAttention(nn.Module):
         # Softmax to normalize attention weights
         if self.dist_type == "dirichlet":
             raw_scores = [align]
-        elif self.dist_type == "log_normal":
+        elif self.dist_type == "normal":
             raw_scores = self.get_raw_scores(input, memory_bank)
         else:
             raw_scores = [align]

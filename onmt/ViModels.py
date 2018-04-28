@@ -41,7 +41,7 @@ class InferenceNetwork(nn.Module):
         self.rnn_size = rnn_size
 
         # to parametrize log normal distribution
-        if self.dist_type == "log_normal":
+        if self.dist_type == "normal":
             # TODO(demi): make 100 configurable
             self.linear_1 = nn.Linear(rnn_size + rnn_size, 100)
             self.linear_2 = nn.Linear(100, 100)
@@ -49,7 +49,7 @@ class InferenceNetwork(nn.Module):
             self.var_out  = nn.Linear(100, 1)
             self.softplus = nn.Softplus()
 
-    def get_log_normal_scores(self, h_s, h_t):
+    def get_normal_scores(self, h_s, h_t):
         """ h_s: [batch x src_length x rnn_size]
             h_t: [batch x tgt_length x rnn_size]
         """
@@ -96,11 +96,11 @@ class InferenceNetwork(nn.Module):
             #scores = scores.clamp(-1, 1).exp()
             #scores = scores.clamp(min=1e-2)
             scores = [scores]
-        elif self.dist_type == "log_normal":
+        elif self.dist_type == "normal":
             # log normal
             src_memory_bank = src_memory_bank.transpose(1, 2)
             assert src_memory_bank.size() == (batch_size, src_length, rnn_size)
-            scores = self.get_log_normal_scores(src_memory_bank, tgt_memory_bank)
+            scores = self.get_normal_scores(src_memory_bank, tgt_memory_bank)
         elif self.dist_type == "none":
             scores = [torch.bmm(tgt_memory_bank, src_memory_bank)]
         else:
@@ -158,7 +158,7 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
 
         if self.dist_type == "dirichlet":
             p_a_scores = [[]]
-        elif self.dist_type == "log_normal":
+        elif self.dist_type == "normal":
             p_a_scores = [[], []]
         else:
             p_a_scores = [[]]
@@ -272,7 +272,7 @@ class ViNMTModel(nn.Module):
       decoder (:obj:`RNNDecoderBase`): a decoder object
       multi<gpu (bool): setup for multigpu support
     """
-    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="log_normal"):
+    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="normal"):
         self.multigpu = multigpu
         super(ViNMTModel, self).__init__()
         self.encoder = encoder
@@ -319,11 +319,14 @@ class ViNMTModel(nn.Module):
                     q_scores[i] = q_scores[i].view(-1, q_scores[i].size(2))
                 if self.dist_type == "dirichlet":
                     m = torch.distributions.Dirichlet(q_scores[0].cpu())
-                elif self.dist_type == "log_normal":
-                    m = torch.distributions.log_normal.LogNormal(q_scores[0], q_scores[1])
+                elif self.dist_type == "normal":
+                    m = torch.distributions.normal.Normal(q_scores[0], q_scores[1])
                 else:
                     raise Exception("Unsupported dist_type")
-                q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
+                if self.dist_type == 'normal':
+                    q_scores_sample = F.softmax(m.rsample().cuda()).view(batch_size, tgt_length, -1).transpose(0,1)
+                else:
+                    q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
             else:
                 q_scores_sample = F.softmax(q_scores[0], dim=-1).transpose(0, 1)
         else:
@@ -347,7 +350,7 @@ class ViNMTModel(nn.Module):
             if self.dist_type == "dirichlet":
                 return decoder_outputs, attns, dec_state,\
                    (q_scores[0], p_a_scores[0])
-            elif self.dist_type == "log_normal":
+            elif self.dist_type == "normal":
                 return decoder_outputs, attns, dec_state,\
                    (q_scores[0], q_scores[1], p_a_scores[0], p_a_scores[1])
             elif self.dist_type == "none":

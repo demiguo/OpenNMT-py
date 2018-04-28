@@ -193,8 +193,8 @@ class NMTLossCompute(LossComputeBase):
                 q_scores, p_a_scores = dist_scores
                 q_scores = q_scores.transpose(0, 1)
                 p_a_scores = p_a_scores.transpose(0, 1)
-            elif self.dist_type == "log_normal":
-                assert self.dist_type == "log_normal", "Dist Type not found in make shard state"
+            elif self.dist_type == "normal":
+                assert self.dist_type == "normal", "Dist Type not found in make shard state"
                 q_scores_0, q_scores_1, p_a_scores_0, p_a_scores_1 = dist_scores
                 # TODO(demi): understand why we want to transpose
                 q_scores_0 = q_scores_0.transpose(0, 1)
@@ -219,7 +219,7 @@ class NMTLossCompute(LossComputeBase):
                 "q_scores_1": None,
                 "p_a_scores_1": None
             }
-        elif self.dist_type == "log_normal":
+        elif self.dist_type == "normal":
             return {
                 "output": output,
                 "target": batch.tgt[range_[0] + 1: range_[1]],
@@ -274,7 +274,7 @@ class NMTLossCompute(LossComputeBase):
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
             #loss += kl
             loss = xent # + kl
-        elif self.dist_type == "log_normal":
+        elif self.dist_type == "normal":
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
             p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
             q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
@@ -286,8 +286,8 @@ class NMTLossCompute(LossComputeBase):
             q_scores_1 = q_scores_1[gtruth.ne(self.padding_idx)]
             p_a_scores_1 = p_a_scores_1[gtruth.ne(self.padding_idx)]
 
-            q_dist = torch.distributions.log_normal.LogNormal(q_scores_0, q_scores_1)
-            p_a_dist = torch.distributions.log_normal.LogNormal(p_a_scores_0, p_a_scores_1)
+            q_dist = torch.distributions.normal.Normal(q_scores_0, q_scores_1)
+            p_a_dist = torch.distributions.normal.Normal(p_a_scores_0, p_a_scores_1)
 
             kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
