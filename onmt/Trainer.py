@@ -133,7 +133,8 @@ class Trainer(object):
 
     def __init__(self, model, train_loss, valid_loss, optim,
                  trunc_size=0, shard_size=32, data_type='text',
-                 norm_method="sents", grad_accum_count=1, q_warmup_steps=0):
+                 norm_method="sents", grad_accum_count=1,
+                 q_warmup_steps=0, n_attn_samples=1):
         # Basic attributes.
         self.model = model
         self.train_loss = train_loss
@@ -147,6 +148,7 @@ class Trainer(object):
         self.progress_step = 0
 
         self.q_warmup_steps = q_warmup_steps
+        self.n_attn_samples = n_attn_samples
         self.alphas = defaultdict(lambda: 1)
         if q_warmup_steps > 0:
             for i, x in enumerate(torch.range(0, 1, 1 / q_warmup_steps).tolist()):
@@ -243,11 +245,6 @@ class Trainer(object):
             src = onmt.io.make_features(batch, 'src', self.data_type)
             if self.data_type == 'text':
                 _, src_lengths = batch.src
-                # overwrite source
-                x = src.clone()
-                for i, l in enumerate(src_lengths.tolist()):
-                    x[:l,i,0].copy_(torch.arange(l)+5)
-                #src = x
             else:
                 src_lengths = None
 
@@ -323,13 +320,6 @@ class Trainer(object):
             if self.data_type == 'text':
                 _, src_lengths = batch.src
                 report_stats.n_src_words += src_lengths.sum()
-                """
-                # LOL remove source information
-                x = src.clone()
-                for i, l in enumerate(src_lengths.tolist()):
-                    x[:l,i,0].copy_(torch.arange(l)+5)
-                #src = x
-                """
             else:
                 src_lengths = None
 
@@ -339,17 +329,19 @@ class Trainer(object):
                 # 1. Create truncated target.
                 tgt = tgt_outer[j: j + trunc_size]
 
-                # 2. F-prop all but generator.
-                if self.grad_accum_count == 1:
-                    self.model.zero_grad()
-                outputs, attns, dec_state, dist_scores = \
-                    self.model(src, tgt, src_lengths, dec_state)
+                for _ in range(self.n_attn_samples):
+                    # 2. F-prop all but generator.
+                    if self.grad_accum_count == 1:
+                        self.model.zero_grad()
+                    outputs, attns, dec_state, dist_scores = \
+                        self.model(src, tgt, src_lengths, dec_state)
 
-                # 3. Compute loss in shards for memory efficiency.
-                self.train_loss.alpha = self.alphas[self.progress_step]
-                batch_stats = self.train_loss.sharded_compute_loss(
-                        batch, outputs, attns, j,
-                        trunc_size, self.shard_size, normalization, dist_scores=dist_scores)
+                    # 3. Compute loss in shards for memory efficiency.
+                    self.train_loss.alpha = self.alphas[self.progress_step]
+                    batch_stats = self.train_loss.sharded_compute_loss(
+                            batch, outputs, attns, j,
+                            trunc_size, self.shard_size,
+                            normalization * self.n_attn_samples, dist_scores=dist_scores)
 
                 nans = [
                     (name, param)

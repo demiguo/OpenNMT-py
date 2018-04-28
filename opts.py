@@ -372,7 +372,10 @@ def train_opts(parser):
                        For more detailed information, see:
                        https://arxiv.org/abs/1512.00567""")
     group.add_argument("-q_warmup_steps", type=int, default=0,
-                    help="""Number of warmup steps / batches / epochs?
+                    help="""Number of warmup steps
+                    """)
+    group.add_argument("-n_attn_samples", type=int, default=1,
+                    help="""Number of attn samples.
                     """)
     # learning rate
     group = parser.add_argument_group('Optimization- Rate')
