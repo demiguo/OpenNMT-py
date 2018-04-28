@@ -324,7 +324,7 @@ class ViNMTModel(nn.Module):
         enc_state = self.decoder.init_decoder_state(
             src, memory_bank, enc_final)
         if self.inference_network is not None:
-            SRC_PRECOMPUTE = True
+            SRC_PRECOMPUTE = False
             # enc_final is unused anyway, lol
             src_precompute = (enc_final, memory_bank.detach()) if SRC_PRECOMPUTE else None
 
