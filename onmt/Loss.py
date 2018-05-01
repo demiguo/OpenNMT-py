@@ -273,6 +273,7 @@ class NMTLossCompute(LossComputeBase):
         if q_scores_0 is None or p_a_scores_0 is None:
             loss = xent
             kl = xent.new([0])
+            Hq = xent.new([0])
         elif self.dist_type == "dirichlet":
             # T x N x S
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
@@ -289,6 +290,8 @@ class NMTLossCompute(LossComputeBase):
 
             # LOL
             Hq = q_dist.entropy().sum()
+            if q_scores_0.max() > 1.5:
+                import pdb; pdb.set_trace()
 
             if self.sample_kl:
                 # use the fucking samples, lol

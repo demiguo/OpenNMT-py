@@ -256,6 +256,9 @@ def train_model(model, fields, optim, data_type, model_opt):
                                        fields, opt)
         train_stats = trainer.train(train_iter, epoch, report_func)
         print('Train perplexity: %g' % train_stats.ppl())
+        print('Train reconstruction: %g' % train_stats.pppl())
+        print('Train xent: %g' % train_stats.xent())
+        print('Train KL: %g' % train_stats.kl())
         print('Train accuracy: %g' % train_stats.accuracy())
 
         # 2. Validate on the validation set.
@@ -264,6 +267,9 @@ def train_model(model, fields, optim, data_type, model_opt):
                                        is_train=False)
         valid_stats = trainer.validate(valid_iter)
         print('Validation perplexity: %g' % valid_stats.ppl())
+        print('Validation reconstruction: %g' % valid_stats.pppl())
+        print('Validation xent: %g' % valid_stats.xent())
+        print('Validation KL: %g' % valid_stats.kl())
         print('Validation accuracy: %g' % valid_stats.accuracy())
 
         # 3. Log to remote server.
@@ -371,7 +377,7 @@ def build_model(model_opt, opt, fields, checkpoint):
 
     if opt.freeze_generative_model:
         for name, param in model.named_parameters():
-            if "inference_network" not in name and "attn" not in name:
+            if "inference_network" not in name:# and "attn" not in name:
                 param.requires_grad = False
 
     if len(opt.gpuid) > 1:

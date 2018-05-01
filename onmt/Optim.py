@@ -79,10 +79,12 @@ class Optim(object):
                 else:
                     self.sparse_params.append(p)
         if self.method == 'sgd':
-            self.optimizer = MultipleOptimizer([
-                optim.SGD(self.params, lr=self.lr),
-                optim.SGD(self.inference_network_params, lr=self.lr),
-            ])
+            ops = []
+            if self.inference_network_params:
+                ops.append(optim.SGD(self.inference_network_params, lr=self.lr))
+            if self.params:
+                ops.append(optim.SGD(self.params, lr=self.lr))
+            self.optimizer = MultipleOptimizer(ops)
         elif self.method == 'adagrad':
             self.optimizer = optim.Adagrad(self.params, lr=self.lr)
             for group in self.optimizer.param_groups:
