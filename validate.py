@@ -92,7 +92,7 @@ else:
                 x[0].view(-1, 1, 1).cpu(), y.view(-1, 1, 1).cpu(), x[1].cpu())
             attn = attn_dict["std"]
             q_attn = attn_dict["q"]
-            #import pdb; pdb.set_trace()
+            import pdb; pdb.set_trace()
 
             lsm = model.generator(output.squeeze(1))
 

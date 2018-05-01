@@ -98,7 +98,7 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
                                          src_feature_dicts,
                                          for_inference_network=True)
         tgt_embeddings = make_embeddings(opt, tgt_dict,
-                                         feature_dicts, for_encoder=False,
+                                         tgt_feature_dicts, for_encoder=False,
                                          for_inference_network=True)
     else:
         print ('    * share embeddings: True')

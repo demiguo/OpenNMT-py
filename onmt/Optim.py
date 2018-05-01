@@ -3,8 +3,8 @@ from torch.nn.utils import clip_grad_norm
 
 
 class MultipleOptimizer(object):
-    def __init__(self, op):
-        self.optimizers = op
+    def __init__(self, ops):
+        self.optimizers = ops
 
     def zero_grad(self):
         for op in self.optimizers:
@@ -69,14 +69,20 @@ class Optim(object):
     def set_parameters(self, params):
         self.params = []
         self.sparse_params = []
+        self.inference_network_params = []
         for k, p in params:
             if p.requires_grad:
-                if self.method != 'sparseadam' or "embed" not in k:
+                if "inference_network" in k:
+                    self.inference_network_params.append(p)
+                elif self.method != 'sparseadam' or "embed" not in k:
                     self.params.append(p)
                 else:
                     self.sparse_params.append(p)
         if self.method == 'sgd':
-            self.optimizer = optim.SGD(self.params, lr=self.lr)
+            self.optimizer = MultipleOptimizer([
+                optim.SGD(self.params, lr=self.lr),
+                optim.SGD(self.inference_network_params, lr=self.lr),
+            ])
         elif self.method == 'adagrad':
             self.optimizer = optim.Adagrad(self.params, lr=self.lr)
             for group in self.optimizer.param_groups:
@@ -86,8 +92,11 @@ class Optim(object):
         elif self.method == 'adadelta':
             self.optimizer = optim.Adadelta(self.params, lr=self.lr)
         elif self.method == 'adam':
-            self.optimizer = optim.Adam(self.params, lr=self.lr,
-                                        betas=self.betas, eps=1e-9)
+            self.optimizer = MultipleOptimizer([
+                optim.Adam(self.params, lr=self.lr,
+                           betas=self.betas, eps=1e-9),
+                optim.Adam(self.inference_network_params, lr=self.lr, betas=self.betas, eps=1e-9),
+            ])
         elif self.method == 'sparseadam':
             self.optimizer = MultipleOptimizer(
                 [optim.Adam(self.params, lr=self.lr,
@@ -99,11 +108,16 @@ class Optim(object):
 
     def _set_rate(self, lr):
         self.lr = lr
+        for op in self.optimizer.optimizers:
+            op.param_groups[0]['lr'] = self.lr
+        """
+        jjj
         if self.method != 'sparseadam':
             self.optimizer.param_groups[0]['lr'] = self.lr
         else:
             for op in self.optimizer.optimizers:
                 op.param_groups[0]['lr'] = self.lr
+                """
 
     def step(self):
         """Update the model parameters based on current gradients.
@@ -123,6 +137,7 @@ class Optim(object):
 
         if self.max_grad_norm:
             clip_grad_norm(self.params, self.max_grad_norm)
+            clip_grad_norm(self.inference_network_params, self.max_grad_norm)
 
         self.optimizer.step()
 
@@ -142,5 +157,7 @@ class Optim(object):
             print("Decaying learning rate to %g" % self.lr)
 
         self.last_ppl = ppl
-        if self.method != 'sparseadam':
-            self.optimizer.param_groups[0]['lr'] = self.lr
+        #if self.method != 'sparseadam':
+            #self.optimizer.param_groups[0]['lr'] = self.lr
+        for op in self.optimizer.optimizers:
+            op.param_groups[0]['lr'] = self.lr

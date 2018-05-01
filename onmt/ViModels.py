@@ -317,6 +317,7 @@ class ViNMTModel(nn.Module):
                  * final decoder state
         """
 
+        inftgt = tgt[1:]
         tgt = tgt[:-1]  # exclude last target from inputs
         tgt_length, batch_size, rnn_size = tgt.size()
 
@@ -329,7 +330,7 @@ class ViNMTModel(nn.Module):
             src_precompute = (enc_final, memory_bank.detach()) if SRC_PRECOMPUTE else None
 
             # inference network q(z|x,y)
-            q_scores = self.inference_network(src, tgt, lengths, src_precompute) # batch_size, tgt_length, src_length
+            q_scores = self.inference_network(src, inftgt, lengths, src_precompute) # batch_size, tgt_length, src_length
             q_nparam = len(q_scores)
             src_length = q_scores[0].size(2)
             if self.dist_type != "none":

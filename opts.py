@@ -377,6 +377,12 @@ def train_opts(parser):
     group.add_argument("-n_attn_samples", type=int, default=1,
                     help="""Number of attn samples.
                     """)
+    group.add_argument("-sample_kl", type=int, default=0,
+                    help="""Use sample instead of analytic KL.
+                    """)
+    group.add_argument("-detach_p_kl", type=int, default=0,
+                    help="""Use sample instead of analytic KL.
+                    """)
     # learning rate
     group = parser.add_argument_group('Optimization- Rate')
     group.add_argument('-learning_rate', type=float, default=1.0,

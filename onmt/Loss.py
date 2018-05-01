@@ -165,11 +165,14 @@ class NMTLossCompute(LossComputeBase):
     Standard NMT Loss Computation.
     """
     def __init__(self, generator, tgt_vocab, normalization="sents",
-                 label_smoothing=0.0, dist_type="none"):
+                 label_smoothing=0.0, dist_type="none", sample_kl=False,
+                 detach_p_kl=False):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
 
         self.alpha = None
+        self.sample_kl = sample_kl
+        self.detach_p_kl = detach_p_kl
 
         # TODO(demi): change this, add KL loss for inference network
         self.dist_type = dist_type
@@ -222,7 +225,9 @@ class NMTLossCompute(LossComputeBase):
                 "q_scores_0": q_scores,
                 "p_a_scores_0": p_a_scores,
                 "q_scores_1": None,
-                "p_a_scores_1": None
+                "p_a_scores_1": None,
+                "q_sample": attns["q"],
+                "p_sample": attns["std"],
             }
         elif self.dist_type == "log_normal":
             return {
@@ -247,7 +252,7 @@ class NMTLossCompute(LossComputeBase):
 
 
     def _compute_loss(self, batch, output, target,
-                      q_scores_0=None, p_a_scores_0=None, q_scores_1=None, p_a_scores_1=None):
+                      q_scores_0=None, p_a_scores_0=None, q_scores_1=None, p_a_scores_1=None, q_sample=None, p_sample=None):
         # TODO(demi): understand how sharding work and make sure "additional loss" works
         scores = self.generator(self._bottle(output))
         bsz = len(batch.indices)
@@ -277,31 +282,25 @@ class NMTLossCompute(LossComputeBase):
             #p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
 
             q_dist = torch.distributions.Dirichlet(q_scores_0[mask])
-            p_a_dist = torch.distributions.Dirichlet(p_a_scores_0[mask])
+            p_a_dist = torch.distributions.Dirichlet(
+                (p_a_scores_0 if not self.detach_p_kl else p_a_scores_0.detach())[mask])
             kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
             #print("analytic kl: {}".format(akl.item()))
 
             # LOL
             Hq = q_dist.entropy().sum()
 
-            SAMPLE_KL = False
-            if SAMPLE_KL:
-                #q_dist = torch.distributions.Dirichlet(q_scores_0.cpu())
-                #p_a_dist = torch.distributions.Dirichlet(p_a_scores_0.cpu())
-                q_dist = torch.distributions.Dirichlet(q_scores_0[mask].cpu())
-                p_a_dist = torch.distributions.Dirichlet(p_a_scores_0[mask].cpu())
-                # sample KL
-                n_samples = 1
-                q_samples = q_dist.rsample(torch.Size([n_samples]))
-                #p_samples = p_a_dist.rsample(torch.Size([n_samples]))
-                _Hq = -q_dist.log_prob(q_samples)
-                _Xp = -p_a_dist.log_prob(q_samples)
+            if self.sample_kl:
+                # use the fucking samples, lol
+                # it's fine to leave it like this because we're averaging over samples
+                _Hq = -q_dist.log_prob(q_sample.view(-1,q_sample.size(2))[mask])
+                _Xp = -p_a_dist.log_prob(q_sample.view(-1,q_sample.size(2))[mask])
                 ln = -_Hq + _Xp
                 lens = batch.src[1]
                 #F.kl_div(p_samples.squeeze().log(), q_samples.squeeze().detach(), size_average=False) / gtruth.nelement()
                 #kl = F.kl_div(p_samples.squeeze().log(), q_samples.squeeze().detach(), size_average=False) / mask.int().sum()
                 #kl = kl.cuda()
-                kl = ln.mean(0).sum().cuda()
+                kl = ln.sum().cuda()
                 #print("approximate kl: {}".format(kl.item()))
                 #import pdb; pdb.set_trace()
 
