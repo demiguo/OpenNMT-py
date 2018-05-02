@@ -101,9 +101,19 @@ class InferenceNetwork(nn.Module):
             #scores = scores.clamp(1e-2, 5).exp() # this one works in prior
             scores = scores.clamp(-2, 5).exp()
             #scores = scores.clamp(min=1e-2)
-            def dir_natural_gradient(grad):
-                import pdb; pdb.set_trace()
-            #scores.register_hook(dir_natural_gradient)
+
+            USE_NATURAL = True
+            if USE_NATURAL:
+                def dir_natural_gradient(grad):
+                    alpha = scores[0].data
+                    N, T, S = alpha.size()
+                    res = alpha.new(N*T, S, S).fill_(0)
+                    res.as_strided(torch.Size([N*T, S]), [res.stride(0), res.size(2)+1]) \
+                        .copy_(torch.polygamma(1, alpha.view(N*T, S)))
+                    Fim = res - torch.polygamma(1, alpha.sum())
+                    Finv = torch.cat([x.squeeze(0).inverse().unsqueeze(0) for x in Fim.split(1)], 0)
+                    return torch.bmm(Finv, grad.data.view(N*T, S, 1)).view(N, T, S)
+                scores.register_hook(dir_natural_gradient)
 
             scores = [scores]
         elif self.dist_type == "log_normal":
