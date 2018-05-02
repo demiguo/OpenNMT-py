@@ -22,6 +22,11 @@ data = true.rsample(torch.Size([256]))
 print(alpha.data.clamp(-2, 5).exp())
 print(beta.data.clamp(-2, 5).exp())
 
+UPDATE_BETA = False
+
+def get_kl(alpha, beta):
+    return kl_div(Dir(alpha.clamp(-2, 5).exp()), Dir(beta.clamp(-2, 5).exp()))
+
 # GD
 def gd(alpha, beta):
     print("GRADIENT DESCENT")
@@ -30,7 +35,7 @@ def gd(alpha, beta):
     beta.requires_grad = True
     for i in range(steps):
         print("Step {}".format(i))
-        kl = kl_div(Dir(alpha.clamp(-2, 5).exp()), Dir(beta.clamp(-2, 5).exp()))
+        kl = get_kl(alpha, beta)
         print("KL div: {}".format(kl.item()))
         kl.backward()
         print("ealpha: {}".format(alpha.data.clamp(-2, 5).exp()))
@@ -39,7 +44,8 @@ def gd(alpha, beta):
         #print("beta.grad: {}".format(beta.grad))
 
         alpha.data = alpha.data - lr * alpha.grad.data
-        beta.data = beta.data - lr * beta.grad.data
+        if UPDATE_BETA:
+            beta.data = beta.data - lr * beta.grad.data
         alpha.grad.data.zero_()
         beta.grad.data.zero_()
 
@@ -102,7 +108,8 @@ def nat(alpha, beta):
         #print("beta.grad: {}".format(beta.grad))
         
         alpha.data = alpha.data - lr * alpha.grad.data
-        beta.data = beta.data - lr * beta.grad.data
+        if UPDATE_BETA:
+            beta.data = beta.data - lr * beta.grad.data
         alpha.grad.data.zero_()
         beta.grad.data.zero_()
 
