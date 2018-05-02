@@ -399,6 +399,7 @@ def build_optim(model, checkpoint):
         optim = onmt.Optim(
             opt.optim, opt.learning_rate, opt.max_grad_norm,
             lr_decay=opt.learning_rate_decay,
+            inf_net_lr=opt.inference_network_learning_rate,
             start_decay_at=opt.start_decay_at,
             beta1=opt.adam_beta1,
             beta2=opt.adam_beta2,

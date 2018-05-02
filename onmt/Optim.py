@@ -7,11 +7,11 @@ class MultipleOptimizer(object):
         self.optimizers = ops
 
     def zero_grad(self):
-        for op in self.optimizers:
+        for op in self.optimizers.values():
             op.zero_grad()
 
     def step(self):
-        for op in self.optimizers:
+        for op in self.optimizers.values():
             op.step()
 
 
@@ -82,11 +82,12 @@ class Optim(object):
                 else:
                     self.sparse_params.append(p)
         if self.method == 'sgd':
-            ops = []
+            ops = {}
             if self.params:
-                ops.append(optim.SGD(self.params, lr=self.lr))
+                ops["params"] = optim.SGD(self.params, lr=self.lr)
             if self.inference_network_params:
-                ops.append(optim.SGD(self.inference_network_params, lr=self.inf_net_lr))
+                ops["inf_net_params"] = optim.SGD(
+                    self.inference_network_params, lr=self.inf_net_lr)
             self.optimizer = MultipleOptimizer(ops)
         elif self.method == 'adagrad':
             self.optimizer = optim.Adagrad(self.params, lr=self.lr)
@@ -97,11 +98,11 @@ class Optim(object):
         elif self.method == 'adadelta':
             self.optimizer = optim.Adadelta(self.params, lr=self.lr)
         elif self.method == 'adam':
-            self.optimizer = MultipleOptimizer([
-                optim.Adam(self.params, lr=self.lr,
+            self.optimizer = MultipleOptimizer(dict(
+                params=optim.Adam(self.params, lr=self.lr,
                            betas=self.betas, eps=1e-9),
-                optim.Adam(self.inference_network_params, lr=self.inf_net_lr, betas=self.betas, eps=1e-9),
-            ])
+                inf_net_params=optim.Adam(self.inference_network_params, lr=self.inf_net_lr, betas=self.betas, eps=1e-9),
+            ))
         elif self.method == 'sparseadam':
             self.optimizer = MultipleOptimizer(
                 [optim.Adam(self.params, lr=self.lr,
@@ -166,5 +167,7 @@ class Optim(object):
         self.last_ppl = ppl
         #if self.method != 'sparseadam':
             #self.optimizer.param_groups[0]['lr'] = self.lr
-        for op in self.optimizer.optimizers:
-            op.param_groups[0]['lr'] = self.lr
+        if "params" in self.optimizer.optimizers:
+            self.optimizer.optimizers["params"].param_groups[0]['lr'] = self.lr
+        if "inf_net_params" in self.optimizer.optimizers:
+            self.optimizer.optimizers["inf_net_params"].param_groups[0]['lr'] = self.inf_net_lr
