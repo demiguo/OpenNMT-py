@@ -22,7 +22,7 @@ data = true.rsample(torch.Size([256]))
 print(alpha.data.clamp(-2, 5).exp())
 print(beta.data.clamp(-2, 5).exp())
 
-UPDATE_BETA = False
+UPDATE_BETA = True
 
 def get_kl(alpha, beta):
     return kl_div(Dir(alpha.clamp(-2, 5).exp()), Dir(beta.clamp(-2, 5).exp()))
@@ -38,9 +38,9 @@ def gd(alpha, beta):
         kl = get_kl(alpha, beta)
         print("KL div: {}".format(kl.item()))
         kl.backward()
-        print("ealpha: {}".format(alpha.data.clamp(-2, 5).exp()))
+        print("ealpha: {}".format(alpha.data.clamp(-2, 5).exp().view(4,5)))
         #print("alpha.grad: {}".format(alpha.grad))
-        print("ebeta: {}".format(beta.data.clamp(-2, 5).exp()))
+        print("ebeta: {}".format(beta.data.clamp(-2, 5).exp().view(4,5)))
         #print("beta.grad: {}".format(beta.grad))
 
         alpha.data = alpha.data - lr * alpha.grad.data
@@ -96,15 +96,15 @@ def nat(alpha, beta):
             return torch.bmm(Finv, grad.view(N*T, S, 1)).view(N, T, S).squeeze()
 
         ealpha.register_hook(ealpha_hook)
-        ebeta.register_hook(ebeta_hook)
+        #ebeta.register_hook(ebeta_hook)
 
         kl = kl_div(Dir(ealpha), Dir(ebeta))
         print("KL div: {}".format(kl.item()))
         kl.backward()
 
-        print("ealpha: {}".format(alpha.data.clamp(-2, 5).exp()))
+        print("ealpha: {}".format(alpha.data.clamp(-2, 5).exp().view(4,5)))
         #print("alpha.grad: {}".format(alpha.grad))
-        print("ebeta: {}".format(beta.data.clamp(-2, 5).exp()))
+        print("ebeta: {}".format(beta.data.clamp(-2, 5).exp().view(4,5)))
         #print("beta.grad: {}".format(beta.grad))
         
         alpha.data = alpha.data - lr * alpha.grad.data
