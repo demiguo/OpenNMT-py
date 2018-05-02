@@ -10,7 +10,7 @@ import torch.nn.functional as F
 steps = 10
 lr = 0.01
 
-dim = 5
+dim = 50
 alpha = torch.randn(dim, requires_grad=True)
 alpha.data.mul_(2)
 beta = torch.randn(dim, requires_grad=True)
