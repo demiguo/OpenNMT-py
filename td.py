@@ -39,12 +39,11 @@ def gd(alpha, beta):
         #print("beta.grad: {}".format(beta.grad))
 
         alpha.data = alpha.data - lr * alpha.grad.data
-        #beta.data = beta.data - lr * beta.grad.data
+        beta.data = beta.data - lr * beta.grad.data
         alpha.grad.data.zero_()
         beta.grad.data.zero_()
 
 def nat(alpha, beta):
-    lr = 0.01
     print("Natural GD")
     alpha, beta = alpha.detach(), beta.detach()
     alpha.requires_grad = True
@@ -103,7 +102,7 @@ def nat(alpha, beta):
         #print("beta.grad: {}".format(beta.grad))
         
         alpha.data = alpha.data - lr * alpha.grad.data
-        #beta.data = beta.data - lr * beta.grad.data
+        beta.data = beta.data - lr * beta.grad.data
         alpha.grad.data.zero_()
         beta.grad.data.zero_()
 
