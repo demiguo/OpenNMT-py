@@ -98,8 +98,13 @@ class InferenceNetwork(nn.Module):
             # affine
             #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
             # exp
-            scores = scores.clamp(1e-2, 5).exp()
+            #scores = scores.clamp(1e-2, 5).exp() # this one works in prior
+            scores = scores.clamp(-2, 5).exp()
             #scores = scores.clamp(min=1e-2)
+            def dir_natural_gradient(grad):
+                import pdb; pdb.set_trace()
+            #scores.register_hook(dir_natural_gradient)
+
             scores = [scores]
         elif self.dist_type == "log_normal":
             # log normal
@@ -118,6 +123,7 @@ class InferenceNetwork(nn.Module):
             mask = mask.unsqueeze(1)
             for i in range(nparam):
                 scores[i].data.masked_fill_(1-mask, self.mask_val)
+
         return scores
 
 
@@ -331,6 +337,9 @@ class ViNMTModel(nn.Module):
 
             # inference network q(z|x,y)
             q_scores = self.inference_network(src, inftgt, lengths, src_precompute) # batch_size, tgt_length, src_length
+
+            #q_scores[0].register_hook(lambda x: print(x.min().item(), x.max().item()))
+
             q_nparam = len(q_scores)
             src_length = q_scores[0].size(2)
             if self.dist_type != "none":

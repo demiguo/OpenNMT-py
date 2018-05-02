@@ -122,7 +122,6 @@ class LossComputeBase(nn.Module):
         range_ = (cur_trunc, cur_trunc + trunc_size)
         shard_state = self._make_shard_state(batch, output, range_, attns, dist_scores=dist_scores)
         #print("sharded compute loss")
-        #import pdb; pdb.set_trace()
         for shard in shards(shard_state, shard_size):
             loss, stats = self._compute_loss(batch, **shard)
             loss.div(normalization).backward(retain_graph=True)
@@ -290,8 +289,6 @@ class NMTLossCompute(LossComputeBase):
 
             # LOL
             Hq = q_dist.entropy().sum()
-            if q_scores_0.max() > 1.5:
-                import pdb; pdb.set_trace()
 
             if self.sample_kl:
                 # use the fucking samples, lol

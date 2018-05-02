@@ -383,6 +383,9 @@ def train_opts(parser):
     group.add_argument("-detach_p_kl", type=int, default=0,
                     help="""Use sample instead of analytic KL.
                     """)
+    group.add_argument("-inference_network_learning_rate", type=float, default=0.1,
+                    help="""Inference network learning rate.
+                    """)
     # learning rate
     group = parser.add_argument_group('Optimization- Rate')
     group.add_argument('-learning_rate', type=float, default=1.0,

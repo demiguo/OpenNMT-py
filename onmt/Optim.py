@@ -45,6 +45,7 @@ class Optim(object):
     # was used there however, beta2=0.999 is still arguably the more
     # established value, so we use that here as well
     def __init__(self, method, lr, max_grad_norm,
+                 inf_net_lr=0.1,
                  lr_decay=1, start_decay_at=None,
                  beta1=0.9, beta2=0.999,
                  adagrad_accum=0.0,
@@ -54,6 +55,8 @@ class Optim(object):
         self.last_ppl = None
         self.lr = lr
         self.original_lr = lr
+        self.inf_net_lr = inf_net_lr
+        self.original_inf_net_lr = inf_net_lr
         self.max_grad_norm = max_grad_norm
         self.method = method
         self.lr_decay = lr_decay
@@ -80,10 +83,10 @@ class Optim(object):
                     self.sparse_params.append(p)
         if self.method == 'sgd':
             ops = []
-            if self.inference_network_params:
-                ops.append(optim.SGD(self.inference_network_params, lr=self.lr))
             if self.params:
                 ops.append(optim.SGD(self.params, lr=self.lr))
+            if self.inference_network_params:
+                ops.append(optim.SGD(self.inference_network_params, lr=self.inf_net_lr))
             self.optimizer = MultipleOptimizer(ops)
         elif self.method == 'adagrad':
             self.optimizer = optim.Adagrad(self.params, lr=self.lr)
@@ -97,7 +100,7 @@ class Optim(object):
             self.optimizer = MultipleOptimizer([
                 optim.Adam(self.params, lr=self.lr,
                            betas=self.betas, eps=1e-9),
-                optim.Adam(self.inference_network_params, lr=self.lr, betas=self.betas, eps=1e-9),
+                optim.Adam(self.inference_network_params, lr=self.inf_net_lr, betas=self.betas, eps=1e-9),
             ])
         elif self.method == 'sparseadam':
             self.optimizer = MultipleOptimizer(
@@ -156,7 +159,9 @@ class Optim(object):
 
         if self.start_decay:
             self.lr = self.lr * self.lr_decay
+            self.inf_net_lr = self.inf_net_lr * self.lr_decay
             print("Decaying learning rate to %g" % self.lr)
+            print("Decaying inf learning rate to %g" % self.inf_net_lr)
 
         self.last_ppl = ppl
         #if self.method != 'sparseadam':

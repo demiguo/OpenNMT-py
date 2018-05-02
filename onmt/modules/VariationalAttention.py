@@ -185,7 +185,8 @@ class VariationalAttention(nn.Module):
 
         # Softmax to normalize attention weights
         if self.dist_type == "dirichlet":
-            align = align.clamp(1e-2, 5).exp()
+            #align = align.clamp(1e-2, 5).exp()
+            align = align.clamp(-2, 5).exp()
             raw_scores = [align]
         elif self.dist_type == "log_normal":
             raw_scores = self.get_raw_scores(input, memory_bank)
