@@ -110,6 +110,10 @@ def model_opts(parser):
                        help="""Always perform input feeding with the prior P
                        rather than approximate posterior Q even during training.
                        """)
+    group.add_argument("-alpha_transformation", type=str, default="exp",
+                       choices=["softplus", "exp", "relu"],
+                       help="""Transformation used to parameterize Dirichlet.
+                       """)
     group.add_argument("-min_clamp_val", type=float, default=1e-2,
                        help="""Use the generative model, namely the attn prior,
                        instead of the inference network for the attention.
@@ -137,6 +141,8 @@ def model_opts(parser):
     group.add_argument('-inference_network_tgt_layers', type=int, default=2,
                        help='Number of layers in the inference network tgt RNN')
     group.add_argument('-inference_network_rnn_size', type=int, default=500,
+                       help='Size of rnn hidden states in the inference network RNN')
+    group.add_argument('-inference_network_natural_gradient', type=int, default=0,
                        help='Size of rnn hidden states in the inference network RNN')
 
     # Attention options

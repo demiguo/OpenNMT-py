@@ -62,7 +62,8 @@ class VariationalAttention(nn.Module):
     def __init__(
         self, dim,
         dist_type="log_normal",
-        use_prior=False
+        use_prior=False,
+        scoresF=F.softplus,
     ):
         super(VariationalAttention, self).__init__()
 
@@ -71,6 +72,7 @@ class VariationalAttention(nn.Module):
         self.dim = dim
         self.dist_type = dist_type
         self.use_prior = use_prior
+        self.scoresF = scoresF
 
         self.linear_in = nn.Linear(dim, dim, bias=False)
 
@@ -185,8 +187,7 @@ class VariationalAttention(nn.Module):
 
         # Softmax to normalize attention weights
         if self.dist_type == "dirichlet":
-            #align = align.clamp(1e-2, 5).exp()
-            align = align.clamp(-2, 5).exp()
+            align = self.scoresF(align)
             raw_scores = [align]
         elif self.dist_type == "log_normal":
             raw_scores = self.get_raw_scores(input, memory_bank)

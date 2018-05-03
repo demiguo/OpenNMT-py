@@ -5,6 +5,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torch.distributions.kl import kl_divergence
+from torch.distributions import Dirichlet
+
 from torch.autograd import Variable as V
 
 from typing import NamedTuple
@@ -61,6 +64,10 @@ checkpoint = torch.load(
     args.checkpoint_path,
     map_location=lambda storage, loc: storage)
 model_opt = checkpoint['opt']
+if not hasattr(model_opt, "alpha_transformation"):
+    model_opt.alpha_transformation = "exp"
+if not hasattr(model_opt, "inference_network_natural_gradient"):
+    model_opt.inference_network_natural_gradient = 0
 model = onmt.ModelConstructor.make_base_model(model_opt, fields, devid, checkpoint)
 #model.cuda(args.devid) # lol
 
@@ -80,6 +87,8 @@ else:
     attns = []
     q_attns = []
     wordnlls = []
+    p_scoress = []
+    q_scoress = []
     for i, example in tqdm(enumerate(valid)):
         if i > 5:
             break
@@ -92,7 +101,6 @@ else:
                 x[0].view(-1, 1, 1).cpu(), y.view(-1, 1, 1).cpu(), x[1].cpu())
             attn = attn_dict["std"]
             q_attn = attn_dict["q"]
-            import pdb; pdb.set_trace()
 
             lsm = model.generator(output.squeeze(1))
 
@@ -102,6 +110,8 @@ else:
             attns.append(attn)
             q_attns.append(q_attn)
             wordnlls.append(bloss)
+            p_scoress.append(p_a_scores)
+            q_scoress.append(q_scores)
 
     """
     torch.save(nlls, nllpath)
@@ -117,7 +127,7 @@ def visualize_attn():
     #for i in [3105, 2776, 2424, 2357, 1832]:
     for i in [0, 1, 2, 3]:
         example = valid[i]
-        attn = attns[i]
+        attn = p_scoress[i]
 
         # unused
         nll = nlls[i]
@@ -145,14 +155,13 @@ def visualize_attn():
             win=title
         )
 
-        attn = q_attns[i]
+        p_attn = p_scoress[i]
+        attn = q_scoress[i]
 
-        # unused
-        nll = nlls[i]
-        wordnll = wordnlls[i]
+        kl = kl_divergence(Dirichlet(attn.squeeze()), Dirichlet(p_attn.squeeze()))
 
         rownames = list(example.tgt) + ["<eos>"]
-        rownames = ["[{}] {} ({:.2f})".format(i, name, wordnll[i].data[0]) for i, name in enumerate(rownames)]
+        rownames = ["[{}] {} ({:.2f})".format(i, name, kl[i].item()) for i, name in enumerate(rownames)]
         columnnames = list(example.src)
         columnnames = ["[{}] {}".format(i, name) for i, name in enumerate(columnnames)]
         title = "Inf Net {} Example {}".format(args.checkpoint_path.split("/")[-2], i)

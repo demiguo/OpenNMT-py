@@ -1,4 +1,5 @@
 from __future__ import division
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,10 +16,16 @@ from onmt.Models import MeanEncoder, RNNEncoder, InputFeedRNNDecoder, NMTModel
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
                  rnn_type, src_layers, tgt_layers, rnn_size, dropout,
-                 dist_type="none"):
+                 dist_type="none", use_natural=False, scoresF=F.softplus):
         super(InferenceNetwork, self).__init__()
         self.inference_network_type = inference_network_type
         self.dist_type = dist_type
+
+        # natural gradient update
+        self.use_natural = use_natural
+
+        self.scoresF = scoresF
+
         if dist_type == "none":
             self.mask_val = float("-inf")
         else:
@@ -99,11 +106,11 @@ class InferenceNetwork(nn.Module):
             #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
             # exp
             #scores = scores.clamp(1e-2, 5).exp() # this one works in prior
-            scores = scores.clamp(-2, 5).exp()
+            #scores = scores.clamp(-2, 5).exp()
             #scores = scores.clamp(min=1e-2)
+            scores = self.scoresF(scores)
 
-            USE_NATURAL = True
-            if USE_NATURAL:
+            if self.use_natural:
                 def dir_natural_gradient(grad):
                     alpha = scores[0].data
                     N, T, S = alpha.size()
@@ -166,12 +173,14 @@ class ViRNNDecoder(InputFeedRNNDecoder):
     def __init__(self, *args, **kwargs):
         # lol, fucking mess
         use_prior = kwargs.pop("use_prior")
+        scoresF = kwargs.pop("scoresF")
         super(ViRNNDecoder, self).__init__(*args, **kwargs)
         # lol.
         self.attn = onmt.modules.VariationalAttention(
             dim       = self.hidden_size,
             dist_type = kwargs["dist_type"],
             use_prior = use_prior,
+            scoresF   = scoresF,
         )
 
     def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None,

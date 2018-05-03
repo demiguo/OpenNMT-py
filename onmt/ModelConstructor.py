@@ -4,6 +4,7 @@ and creates each encoder and decoder accordingly.
 """
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import onmt
 import onmt.io
@@ -109,6 +110,7 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     rnn_type = opt.rnn_type
     rnn_size = opt.inference_network_rnn_size
     dropout = opt.inference_network_dropout
+    scoresFstring = opt.alpha_transformation
 
     print ('    * inference network type: %s'%inference_network_type)
     print ('    * inference network RNN type: %s'%rnn_type)
@@ -116,13 +118,24 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     print ('    * inference network dropout: %s'%dropout)
     print ('    * inference network src layers: %s'%inference_network_src_layers)
     print ('    * inference network tgt layers: %s'%inference_network_tgt_layers)
+    print ('    * inference network alpha trans: %s'%scoresFstring)
     print ('    * TODO: RNN\'s could be possibly shared')
+
+    if scoresFstring == "softplus":
+        scoresF = F.softplus
+    elif scoresFstring == "exp":
+        scoresF = lambda x: x.clamp(-2, 5).exp()
+    elif scoresFstring == "relu":
+        scoresF = lambda x: x.clamp(min=1e-2)
+    else:
+        raise Exception("Bad transformation")
 
     return InferenceNetwork(inference_network_type,
                             src_embeddings, tgt_embeddings,
                             rnn_type, inference_network_src_layers,
                             inference_network_tgt_layers, rnn_size, dropout,
-                            opt.dist_type)
+                            opt.dist_type, opt.inference_network_natural_gradient > 0,
+                            scoresF=scoresF)
 
 
 def make_decoder(opt, embeddings):
@@ -155,6 +168,17 @@ def make_decoder(opt, embeddings):
                                    opt.dist_type)
     elif opt.input_feed and opt.inference_network_type != "none":
         print("variational decoder")
+        scoresFstring = opt.alpha_transformation
+
+        if scoresFstring == "softplus":
+            scoresF = F.softplus
+        elif scoresFstring == "exp":
+            scoresF = lambda x: x.clamp(-2, 5).exp()
+        elif scoresFstring == "relu":
+            scoresF = lambda x: x.clamp(min=1e-2)
+        else:
+            raise Exception("Bad transformation")
+
         return ViRNNDecoder(
             opt.rnn_type, opt.brnn,
             opt.dec_layers, opt.rnn_size,
@@ -167,6 +191,7 @@ def make_decoder(opt, embeddings):
             opt.reuse_copy_attn,
             dist_type = opt.dist_type,
             use_prior = opt.use_generative_model > 0,
+            scoresF = scoresF,
         )
     else:
         return StdRNNDecoder(opt.rnn_type, opt.brnn,
