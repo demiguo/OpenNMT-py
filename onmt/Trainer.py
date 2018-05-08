@@ -300,9 +300,9 @@ class Trainer(object):
 
         return stats
 
-    # ppl is elbo? or from generative model?
-    def epoch_step(self, ppl, epoch):
-        return self.optim.update_learning_rate(ppl, epoch)
+    # Anneal based on measure of progress
+    def epoch_step(self, measure, epoch):
+        return self.optim.update_learning_rate(measure, epoch)
 
     def drop_checkpoint(self, opt, epoch, fields, valid_stats):
         """ Save a resumable checkpoint.
