@@ -18,7 +18,8 @@ import torch.nn as nn
 import onmt
 import onmt.io
 import onmt.modules
-
+global tttt
+tttt = 0
 
 class Statistics(object):
     """
@@ -123,7 +124,7 @@ class Trainer(object):
             grad_accum_count(int): accumulate gradients this many times.
     """
 
-    def __init__(self, model, train_loss, valid_loss, optim,
+    def __init__(self, model, train_loss, valid_loss, optim, optim_inference_network,
                  trunc_size=0, shard_size=32, data_type='text',
                  norm_method="sents", grad_accum_count=1):
         # Basic attributes.
@@ -131,6 +132,7 @@ class Trainer(object):
         self.train_loss = train_loss
         self.valid_loss = valid_loss
         self.optim = optim
+        self.optim_inference_network = optim_inference_network
         self.trunc_size = trunc_size
         self.shard_size = shard_size
         self.data_type = data_type
@@ -171,7 +173,8 @@ class Trainer(object):
         except NotImplementedError:
             # Dynamic batching
             num_batches = -1
-
+        global b
+        b = None
         for i, batch in enumerate(train_iter):
             cur_dataset = train_iter.get_cur_dataset()
             self.train_loss.cur_dataset = cur_dataset
@@ -186,9 +189,16 @@ class Trainer(object):
                 normalization += batch.batch_size
 
             if accum == self.grad_accum_count:
+                global b
+                if b is None:
+                    b = true_batchs
+                b = true_batchs
                 self._gradient_accumulation(
-                        true_batchs, total_stats,
+                        b, total_stats,
                         report_stats, normalization)
+                #self._gradient_accumulation(
+                #        true_batchs, total_stats,
+                #        report_stats, normalization)
 
                 if report_func is not None:
                     report_stats = report_func(
@@ -255,6 +265,7 @@ class Trainer(object):
         return stats
 
     def epoch_step(self, ppl, epoch):
+        self.optim_inference_network.update_learning_rate(ppl, epoch)
         return self.optim.update_learning_rate(ppl, epoch)
 
     def drop_checkpoint(self, opt, epoch, fields, valid_stats):
@@ -284,6 +295,7 @@ class Trainer(object):
             'opt': opt,
             'epoch': epoch,
             'optim': self.optim,
+            'optim_inference_network': self.optim_inference_network,
         }
         torch.save(checkpoint,
                    '%s_acc_%.2f_ppl_%.2f_e%d.pt'
@@ -349,7 +361,13 @@ class Trainer(object):
                             param.grad[param.grad!=param.grad] = 0
                 # 4. Update the parameters and statistics.
                 if self.grad_accum_count == 1:
+                    global tttt
+                    tttt += 1
+                    #if tttt > 400:
+                    #    print ('-----------------------')
+                    #    self.optim.optimizer.param_groups[0]['lr'] = 0
                     self.optim.step()
+                    self.optim_inference_network.step()
                 total_stats.update(batch_stats)
                 report_stats.update(batch_stats)
 
@@ -358,4 +376,10 @@ class Trainer(object):
                     dec_state.detach()
 
         if self.grad_accum_count > 1:
+            global tttt
+            tttt += 1
+            #if tttt > 400:
+            #    print ('-----------------------')
+            #    self.optim.optimizer.param_groups[0]['lr'] = 0
             self.optim.step()
+            self.optim_inference_network.step()

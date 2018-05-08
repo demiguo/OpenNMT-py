@@ -1,8 +1,35 @@
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
+from torch.autograd import Variable, Function
+NORM = 'bn'
 from onmt.Utils import aeq, sequence_mask
+global ttt
+ttt=0
 
+class MuSigma(Function):
+    # Note that both forward and backward are @staticmethods
+    @staticmethod
+    # bias is an optional argument
+    def forward(ctx, mu, sigma):
+        ctx.save_for_backward(mu, sigma)
+        return mu, sigma
+
+    # This function has only a single output, so it gets only one gradient
+    @staticmethod
+    def backward(ctx, mu_grad_output, sigma_grad_output):
+        mu, sigma = ctx.saved_variables
+        mu_grad_input = sigma_grad_input = None
+        #print ('help')
+
+        if ctx.needs_input_grad[0]:
+            #mu_grad_input = mu_grad_output * sigma
+            mu_grad_input = mu_grad_output
+        if ctx.needs_input_grad[1]:
+            #sigma_grad_input = 2*sigma*sigma*sigma_grad_output
+            sigma_grad_input = sigma_grad_output
+        return mu_grad_input, sigma_grad_input
+musigma = MuSigma.apply
 
 class GlobalAttention(nn.Module):
     """
@@ -75,11 +102,19 @@ class GlobalAttention(nn.Module):
             self.v = nn.Linear(dim, 1, bias=False)
 
         if self.dist_type == "normal":
-            self.linear_1 = nn.Linear(dim + dim, 100)
-            self.linear_2 = nn.Linear(100, 100)
+            self.linear_1 = nn.Linear(dim + dim, 500)
+            self.linear_2 = nn.Linear(500, 500)
             self.softplus = torch.nn.Softplus()
-            self.mean_out = nn.Linear(100, 1)
-            self.var_out = nn.Linear(100, 1)
+            self.relu = torch.nn.ReLU()
+            self.mean_out = nn.Linear(500, 1)
+            self.var_out = nn.Linear(500, 1)
+            if NORM == 'bn' or NORM == 'bn2':
+                self.bn_mu = nn.BatchNorm1d(1, affine=True)
+                self.bn_std = nn.BatchNorm1d(1, affine=True)
+            elif NORM == 'bn3':
+                self.bn_mu = nn.BatchNorm1d(1, affine=False)
+            elif NORM == 'bn4':
+                self.bn_std = nn.BatchNorm1d(1, affine=False)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
@@ -142,22 +177,45 @@ class GlobalAttention(nn.Module):
         aeq(src_batch, tgt_batch)
         aeq(src_dim, tgt_dim)
         aeq(self.dim, src_dim)
+        #import pdb; pdb.set_trace()
         
         h_t_expand = h_t.unsqueeze(2).expand(-1, -1, src_len, -1)
         h_s_expand = h_s.unsqueeze(1).expand(-1, tgt_len, -1, -1)
         # [batch, tgt_len, src_len, src_dim]
+        #print('p src memory')
+        #print(h_s_expand[0][0][1][:15])
+        #print('p tgt memory')
+        #print(h_t_expand[0][0][1][:15])
+        global ttt
+        ttt += 1
+        #if ttt == 2:
+        #    sys.exit(1)
         h_expand = torch.cat((h_t_expand, h_s_expand), dim=3)
         h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
         
         h_enc = self.softplus(self.linear_1(h_fold))
         h_enc = self.softplus(self.linear_2(h_enc))
-        
-        h_mean = self.softplus(self.mean_out(h_enc))
-        h_var = self.softplus(self.var_out(h_enc))
+        h_mean = self.mean_out(h_enc)
+        if NORM == 'bn' or NORM== 'bn3': 
+            h_mean = self.bn_mu(h_mean)
+        #h_mean = self.mean_out(h_enc)
+        #h_std = self.softplus(self.bn_std(self.var_out(h_enc)))
+        h_std = self.var_out(h_enc)
+        if NORM == 'bn' or NORM == 'bn2':
+            h_std = self.bn_std(h_std)
+        elif NORM == 'bn4':
+            pass
+            #h_std = self.bn_std(h_std)
+        h_std = self.softplus(h_std)
+        if NORM == 'none':
+            h_std = 0*h_std + 0.001
+        #h_std = self.softplus(self.var_out(h_enc))
+        #print (h_std)
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
-        h_var = h_var.view(tgt_batch, tgt_len, src_len)
-        return [h_mean, h_var]
+        h_std = h_std.view(tgt_batch, tgt_len, src_len)
+        h_mean, h_std = musigma(h_mean, h_std)
+        return [h_mean, h_std]
 
     def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):
         """
@@ -223,9 +281,13 @@ class GlobalAttention(nn.Module):
 
         # each context vector c_t is the weighted average
         # over all the source hidden states
+        #h_std = h_std.view(tgt_batch, tgt_len, src_len)
+        m = torch.distributions.normal.Normal(raw_scores[0].view(-1, sourceL), raw_scores[1].view(-1, sourceL))
+        p_a_scores_sample = F.softmax(m.rsample().cuda(), dim=-1).view(batch, targetL, sourceL)
         if q_scores_sample is None:
             c = torch.bmm(align_vectors, memory_bank)
         else:
+            #c = torch.bmm(p_a_scores_sample, memory_bank)
             c = torch.bmm(q_scores_sample, memory_bank)
         # what is size of q_scores_sample? batch, targetL, sourceL
 

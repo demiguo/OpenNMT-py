@@ -118,7 +118,7 @@ def model_opts(parser):
                        help="""Inference network src word vec size.""")
     group.add_argument('-inference_network_tgt_word_vec_size', type=int, default=500,
                        help="""Inference network tgt word vec size.""")
-    group.add_argument('-inference_network_dropout', type=int, default=0.3,
+    group.add_argument('-inference_network_dropout', type=int, default=0.0,
                        help="""Inference network dropout.""")
     group.add_argument('-inference_network_src_layers', type=int, default=2,
                        help='Number of layers in the inference network src RNN')
@@ -321,7 +321,7 @@ def train_opts(parser):
                        choices=['sgd', 'adagrad', 'adadelta', 'adam',
                                 'sparseadam'],
                        help="""Optimization method.""")
-    group.add_argument('-adagrad_accumulator_init', type=float, default=0,
+    group.add_argument('-adagrad_accumulator_init', type=float, default=0.1,
                        help="""Initializes the accumulator values in adagrad.
                        Mirrors the initial_accumulator_value option
                        in the tensorflow adagrad (use 0.1 for their default).
@@ -330,7 +330,7 @@ def train_opts(parser):
                        help="""If the norm of the gradient vector exceeds this,
                        renormalize it to have the norm equal to
                        max_grad_norm""")
-    group.add_argument('-dropout', type=float, default=0.3,
+    group.add_argument('-dropout', type=float, default=0.0,
                        help="Dropout probability; applied in LSTM stacks.")
     group.add_argument('-truncated_decoder', type=int, default=0,
                        help="""Truncated bptt.""")

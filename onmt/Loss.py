@@ -9,10 +9,11 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
-
+NORM = 'bn'
 import onmt
 import onmt.io
-
+global ttt
+ttt=0
 
 class LossComputeBase(nn.Module):
     """
@@ -82,7 +83,7 @@ class LossComputeBase(nn.Module):
         """
         range_ = (0, batch.tgt.size(0))
         shard_state = self._make_shard_state(batch, output, range_, attns, dist_scores=dist_scores)
-        _, batch_stats = self._compute_loss(batch, **shard_state)
+        _, batch_stats, _, _ = self._compute_loss(batch, **shard_state)
 
         return batch_stats
 
@@ -122,8 +123,12 @@ class LossComputeBase(nn.Module):
         #print("sharded compute loss")
         #import pdb; pdb.set_trace()
         for shard in shards(shard_state, shard_size):
-            loss, stats = self._compute_loss(batch, **shard)
+            loss, stats, xent, kl = self._compute_loss(batch, **shard)
+            #loss.div(normalization).backward(retain_graph=True)
             loss.div(normalization).backward(retain_graph=True)
+            #xent.div(normalization).backward(retain_graph=True)
+
+            #kl.div(normalization).backward(retain_graph=True)
             batch_stats.update(stats)
 
         return batch_stats
@@ -273,7 +278,6 @@ class NMTLossCompute(LossComputeBase):
             kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
             #loss += kl
-            loss = xent # + kl
         elif self.dist_type == "normal":
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
             p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
@@ -289,7 +293,14 @@ class NMTLossCompute(LossComputeBase):
             q_dist = torch.distributions.normal.Normal(q_scores_0, q_scores_1)
             p_a_dist = torch.distributions.normal.Normal(p_a_scores_0, p_a_scores_1)
 
-            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist)
+            #kl = (q_scores_0-p_a_scores_0).pow(2).sum()
+            #import pdb; pdb.set_trace()
+            global ttt
+            ttt += 1
+            #if ttt >40000:
+            #    import pdb; pdb.set_trace()
+            kl = kl.sum()
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
         elif self.dist_type == "none":
             # Minimize KL from sample, lol.
@@ -304,7 +315,10 @@ class NMTLossCompute(LossComputeBase):
         else:
             raise Exception("Unsupported dist_type")
 
-        loss = xent + kl
+        if NORM == 'bn' or NORM == 'bn2':
+            loss = xent + kl
+        else:
+            loss = xent + kl * 0.00001
 
         if self.confidence < 1:
             # Default: report smoothed ppl.
@@ -315,7 +329,7 @@ class NMTLossCompute(LossComputeBase):
 
         stats = self._stats(loss_data, xent.data.clone(), kl.data.clone(), scores.data, target.view(-1).data)
 
-        return loss, stats
+        return loss, stats, xent, kl
 
 
 def filter_shard_state(state, requires_grad=True):

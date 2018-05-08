@@ -21,7 +21,6 @@ import onmt.modules
 from onmt.Utils import use_gpu
 import opts
 
-
 parser = argparse.ArgumentParser(
     description='train.py',
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -225,7 +224,7 @@ def make_loss_compute(model, tgt_vocab, opt, train=True):
     return compute
 
 
-def train_model(model, fields, optim, data_type, model_opt):
+def train_model(model, fields, optim, optim_inference_network, data_type, model_opt):
     train_loss = make_loss_compute(model, fields["tgt"].vocab, opt)
     valid_loss = make_loss_compute(model, fields["tgt"].vocab, opt,
                                    train=False)
@@ -234,8 +233,9 @@ def train_model(model, fields, optim, data_type, model_opt):
     shard_size = opt.max_generator_batches
     norm_method = opt.normalization
     grad_accum_count = opt.accum_count
+    train_loss.model = model
 
-    trainer = onmt.Trainer(model, train_loss, valid_loss, optim,
+    trainer = onmt.Trainer(model, train_loss, valid_loss, optim, optim_inference_network,
                            trunc_size, shard_size, data_type,
                            norm_method, grad_accum_count)
 
@@ -379,15 +379,30 @@ def build_model(model_opt, opt, fields, checkpoint):
 
 
 def build_optim(model, checkpoint):
-    if opt.train_from:
+    print ('IGNORING INPUT FEED')
+    if False:#opt.train_from:
         print('Loading optimizer from checkpoint.')
         optim = checkpoint['optim']
         optim.optimizer.load_state_dict(
             checkpoint['optim'].optimizer.state_dict())
+        optim_inference_network = checkpoint['optim_inference_network']
+        optim_inference_network.optimizer.load_state_dict(
+            checkpoint['optim_inference_network'].optimizer.state_dict())
     else:
+        print ('IGNORING OPTIMIZER')
         print('Making optimizer for training.')
         optim = onmt.Optim(
-            opt.optim, opt.learning_rate, opt.max_grad_norm,
+            'adam', 0.001, opt.max_grad_norm,
+            lr_decay=opt.learning_rate_decay,
+            start_decay_at=opt.start_decay_at,
+            beta1=opt.adam_beta1,
+            beta2=opt.adam_beta2,
+            adagrad_accum=opt.adagrad_accumulator_init,
+            decay_method=opt.decay_method,
+            warmup_steps=opt.warmup_steps,
+            model_size=opt.rnn_size)
+        optim_inference_network = onmt.Optim(
+            'adam', 0.001, 5,
             lr_decay=opt.learning_rate_decay,
             start_decay_at=opt.start_decay_at,
             beta1=opt.adam_beta1,
@@ -397,9 +412,19 @@ def build_optim(model, checkpoint):
             warmup_steps=opt.warmup_steps,
             model_size=opt.rnn_size)
 
-    optim.set_parameters(model.named_parameters())
+    model_parameters = []
+    inference_network_parameters = []
+    all_parameters = model.named_parameters()
+    for k,v in all_parameters:
+        if 'inference_network' in k:
+            inference_network_parameters.append((k,v))
+        else:
+            print (k)
+            model_parameters.append((k,v))
+    optim.set_parameters(model_parameters)
+    optim_inference_network.set_parameters(inference_network_parameters)
 
-    return optim
+    return optim, optim_inference_network
 
 
 def main():
@@ -440,10 +465,10 @@ def main():
     check_save_model_path()
 
     # Build optimizer.
-    optim = build_optim(model, checkpoint)
+    optim, optim_inference_network = build_optim(model, checkpoint)
 
     # Do training.
-    train_model(model, fields, optim, data_type, model_opt)
+    train_model(model, fields, optim, optim_inference_network, data_type, model_opt)
 
     # If using tensorboard for logging, close the writer after training.
     if opt.tensorboard:
