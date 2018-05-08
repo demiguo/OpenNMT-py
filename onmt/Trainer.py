@@ -31,7 +31,7 @@ class Statistics(object):
     * perplexity
     * elapsed time
     """
-    def __init__(self, loss=0, xent=0, kl=0, Hq=0, n_words=0, n_correct=0):
+    def __init__(self, loss=0, xent=0, kl=0, Hq=0, n_words=0, n_correct=0, xent_p=0, n_correct_p=0):
         self.loss = loss
         self._xent = xent
         self._kl = kl
@@ -40,6 +40,8 @@ class Statistics(object):
         self.n_correct = n_correct
         self.n_src_words = 0
         self.start_time = time.time()
+        self._xent_p = xent_p
+        self.n_correct_p = n_correct_p
 
     def update(self, stat):
         self.loss += stat.loss
@@ -48,12 +50,20 @@ class Statistics(object):
         self._Hq += stat._Hq
         self.n_words += stat.n_words
         self.n_correct += stat.n_correct
+        self._xent_p += stat._xent_p
+        self.n_correct_p += stat.n_correct_p
 
     def accuracy(self):
         return 100 * (self.n_correct / self.n_words)
 
+    def accuracy_p(self):
+        return 100 * (self.n_correct_p / self.n_words)
+
     def xent(self):
         return self._xent / self.n_words
+
+    def xent_p(self):
+        return self._xent_p / self.n_words
 
     def ppl(self):
         return math.exp(min(self.loss / self.n_words, 100))
@@ -80,14 +90,14 @@ class Statistics(object):
            start (int): start time of epoch.
         """
         t = self.elapsed_time()
-        print(("Epoch %2d, %5d/%5d; acc: %6.2f; ppl: %6.2f; xent: %6.2f; " +
-                "pppl: %6.2f; kl: %6.2f; Hq: %6.2f " +
+        print(("Epoch %2d, %5d/%5d; acc: %6.2f; ppl: %6.2f; pppl: %6.2f; " +
+                "xent: %6.2f; kl: %6.2f; Hq: %6.2f " +
                "%3.0f src tok/s; %3.0f tgt tok/s; %6.0f s elapsed") %
               (epoch, batch, n_batches,
                self.accuracy(),
                self.ppl(),
-               self.xent(),
                self.pppl(),
+               self.xent(),
                self.kl(),
                self.Hq(),
                self.n_src_words / (t + 1e-5),
@@ -257,12 +267,28 @@ class Trainer(object):
             tgt = onmt.io.make_features(batch, 'tgt')
 
             # F-prop through the model.
+            self.model.decoder.attn.use_prior = False
             outputs, attns, _, dist_scores = self.model(src, tgt, src_lengths)
 
             # Compute loss.
+            # self.valid_loss.ignore_kl shouldn't affect self.train_loss.ignore_kl
+
+            # ELBO_Q
             self.valid_loss.alpha = 1
+            self.valid_loss.ignore_kl = False
             batch_stats = self.valid_loss.monolithic_compute_loss(
                     batch, outputs, attns, dist_scores=dist_scores)
+
+            # ELBO_P
+            self.model.decoder.attn.use_prior = True
+            outputs, attns, _, dist_scores = self.model(src, tgt, src_lengths)
+            self.valid_loss.ignore_kl = True
+            batch_stats_p = self.valid_loss.monolithic_compute_loss(
+                    batch, outputs, attns, dist_scores=dist_scores)
+
+            # KL will be different since the expectation is wrt P
+            batch_stats._xent_p += batch_stats_p._xent
+            batch_stats.n_correct_p += batch_stats_p.n_correct
 
             # Update statistics.
             stats.update(batch_stats)
@@ -272,6 +298,7 @@ class Trainer(object):
 
         return stats
 
+    # ppl is elbo? or from generative model?
     def epoch_step(self, ppl, epoch):
         return self.optim.update_learning_rate(ppl, epoch)
 

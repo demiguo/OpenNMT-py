@@ -145,12 +145,12 @@ class LossComputeBase(nn.Module):
                           .masked_select(non_padding) \
                           .long().sum()
         return onmt.Statistics(
-            loss.cpu().numpy(),
-            xent.cpu().numpy(),
-            kl.cpu().numpy(),
-            Hq.cpu().numpy(),
-            non_padding.long().sum().cpu().numpy(),
-            num_correct.cpu().numpy())
+            loss=loss.cpu().numpy(),
+            xent=xent.cpu().numpy(),
+            kl=kl.cpu().numpy(),
+            Hq=Hq.cpu().numpy(),
+            n_words=non_padding.long().sum().cpu().numpy(),
+            n_correct=num_correct.cpu().numpy())
 
     def _bottle(self, v):
         return v.view(-1, v.size(2))
@@ -165,13 +165,14 @@ class NMTLossCompute(LossComputeBase):
     """
     def __init__(self, generator, tgt_vocab, normalization="sents",
                  label_smoothing=0.0, dist_type="none", sample_kl=False,
-                 detach_p_kl=False):
+                 detach_p_kl=False, ignore_kl=False):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
 
         self.alpha = None
         self.sample_kl = sample_kl
         self.detach_p_kl = detach_p_kl
+        self.ignore_kl = ignore_kl
 
         # TODO(demi): change this, add KL loss for inference network
         self.dist_type = dist_type
@@ -268,7 +269,8 @@ class NMTLossCompute(LossComputeBase):
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
-        
+
+        # hmmm
         if q_scores_0 is None or p_a_scores_0 is None:
             loss = xent
             kl = xent.new([0])
@@ -352,8 +354,9 @@ class NMTLossCompute(LossComputeBase):
             loss = xent + kl
 
         # testing generative model
-        TEST_GEN = False
-        if TEST_GEN:
+        #TEST_GEN = False
+        #if TEST_GEN:
+        if self.ignore_kl:
             loss = xent
 
         if self.confidence < 1:
@@ -363,7 +366,13 @@ class NMTLossCompute(LossComputeBase):
         else:
             loss_data = loss.data.clone()
 
-        stats = self._stats(loss_data, xent.data.clone(), kl.data.clone(), Hq.data.clone(), scores.data, target.view(-1).data)
+        stats = self._stats(
+            loss=loss_data,
+            xent=xent.data.clone(),
+            kl=kl.data.clone(),
+            Hq=Hq.data.clone(),
+            scores=scores.data,
+            target=target.view(-1).data)
 
         loss = loss
 

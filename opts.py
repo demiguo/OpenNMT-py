@@ -111,7 +111,7 @@ def model_opts(parser):
                        rather than approximate posterior Q even during training.
                        """)
     group.add_argument("-alpha_transformation", type=str, default="exp",
-                       choices=["softplus", "exp", "relu"],
+                       choices=["softplus", "exp", "relu", "sm"],
                        help="""Transformation used to parameterize Dirichlet.
                        """)
     group.add_argument("-min_clamp_val", type=float, default=1e-2,
@@ -123,6 +123,9 @@ def model_opts(parser):
                         help="""q and p_a distribution type.
                         If 'none', then uses a softmax over scores.
                         """)
+    group.add_argument("-dbg_inf", type=int, default=0,
+                    help="""Feed dbg flag to inference network.
+                    """)
     group.add_argument('-inference_network_type', type=str, default='none',
                        choices=['rnn', 'brnn', 'embedding_only', 'none'],
                        help="""Type of inference network to use.
@@ -387,7 +390,10 @@ def train_opts(parser):
                     help="""Use sample instead of analytic KL.
                     """)
     group.add_argument("-detach_p_kl", type=int, default=0,
-                    help="""Use sample instead of analytic KL.
+                    help="""Use KL(Q || P.detach()).
+                    """)
+    group.add_argument("-ignore_kl", type=int, default=0,
+                    help="""Do not backprop through KL.
                     """)
     group.add_argument("-inference_network_learning_rate", type=float, default=0.1,
                     help="""Inference network learning rate.

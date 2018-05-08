@@ -19,6 +19,12 @@ from onmt.modules import Embeddings, ImageEncoder, CopyGenerator, \
 from onmt.Utils import use_gpu
 from torch.nn.init import xavier_uniform
 
+scoresF_dict = {
+    "softplus": F.softplus,
+    "exp": lambda x: x.clamp(-2, 5).exp(),
+    "relu": lambda x: x.clamp(min=1e-2),
+    "sm": lambda x: F.softmax(x, dim=-1),
+}
 
 def make_embeddings(opt, word_dict, feature_dicts, for_encoder=True,
                     for_inference_network=False):
@@ -111,6 +117,7 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     rnn_size = opt.inference_network_rnn_size
     dropout = opt.inference_network_dropout
     scoresFstring = opt.alpha_transformation
+    scoresF = scoresF_dict[scoresFstring]
 
     print ('    * inference network type: %s'%inference_network_type)
     print ('    * inference network RNN type: %s'%rnn_type)
@@ -120,15 +127,6 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     print ('    * inference network tgt layers: %s'%inference_network_tgt_layers)
     print ('    * inference network alpha trans: %s'%scoresFstring)
     print ('    * TODO: RNN\'s could be possibly shared')
-
-    if scoresFstring == "softplus":
-        scoresF = F.softplus
-    elif scoresFstring == "exp":
-        scoresF = lambda x: x.clamp(-2, 5).exp()
-    elif scoresFstring == "relu":
-        scoresF = lambda x: x.clamp(min=1e-2)
-    else:
-        raise Exception("Bad transformation")
 
     return InferenceNetwork(inference_network_type,
                             src_embeddings, tgt_embeddings,
@@ -169,15 +167,7 @@ def make_decoder(opt, embeddings):
     elif opt.input_feed and opt.inference_network_type != "none":
         print("variational decoder")
         scoresFstring = opt.alpha_transformation
-
-        if scoresFstring == "softplus":
-            scoresF = F.softplus
-        elif scoresFstring == "exp":
-            scoresF = lambda x: x.clamp(-2, 5).exp()
-        elif scoresFstring == "relu":
-            scoresF = lambda x: x.clamp(min=1e-2)
-        else:
-            raise Exception("Bad transformation")
+        scoresF = scoresF_dict[scoresFstring]
 
         return ViRNNDecoder(
             opt.rnn_type, opt.brnn,
@@ -288,7 +278,7 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
         NMTModel(encoder, decoder, None, "none")
         if inference_network is None
         else ViNMTModel(
-            encoder, decoder, inference_network, dist_type=model_opt.dist_type)
+            encoder, decoder, inference_network, dist_type=model_opt.dist_type, dbg=model_opt.dbg_inf)
     )
     model.model_type = model_opt.model_type
 

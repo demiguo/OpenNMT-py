@@ -219,7 +219,8 @@ def make_loss_compute(model, tgt_vocab, opt, train=True):
             label_smoothing=(opt.label_smoothing if train else 0.0),
             dist_type=opt.dist_type,
             sample_kl=opt.sample_kl > 0,
-            detach_p_kl=opt.detach_p_kl > 0)
+            detach_p_kl=opt.detach_p_kl > 0,
+            ignore_kl=opt.ignore_kl > 0)
 
     if use_gpu(opt):
         compute.cuda()
@@ -271,6 +272,8 @@ def train_model(model, fields, optim, data_type, model_opt):
         print('Validation xent: %g' % valid_stats.xent())
         print('Validation KL: %g' % valid_stats.kl())
         print('Validation accuracy: %g' % valid_stats.accuracy())
+        print('Validation xent_p: %g' % valid_stats.xent_p())
+        print('Validation accuracy_p: %g' % valid_stats.accuracy_p())
 
         # 3. Log to remote server.
         if opt.exp_host:

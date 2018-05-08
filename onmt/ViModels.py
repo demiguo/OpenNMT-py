@@ -312,13 +312,14 @@ class ViNMTModel(nn.Module):
       decoder (:obj:`RNNDecoderBase`): a decoder object
       multi<gpu (bool): setup for multigpu support
     """
-    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="log_normal"):
+    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="log_normal", dbg=False):
         self.multigpu = multigpu
         super(ViNMTModel, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.inference_network = inference_network
         self.dist_type = dist_type
+        self.dbg = dbg
 
     def forward(self, src, tgt, lengths, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
@@ -342,7 +343,12 @@ class ViNMTModel(nn.Module):
                  * final decoder state
         """
 
-        inftgt = tgt[1:]
+        if self.dbg:
+            # only see past
+            inftgt = tgt[:-1]
+        else:
+            # see present
+            inftgt = tgt[1:]
         tgt = tgt[:-1]  # exclude last target from inputs
         tgt_length, batch_size, rnn_size = tgt.size()
 
