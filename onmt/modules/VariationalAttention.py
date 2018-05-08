@@ -213,8 +213,7 @@ class VariationalAttention(nn.Module):
 
         # each context vector c_t is the weighted average
         # over all the source hidden states
-        if q_scores_sample is None or self.use_prior or not self.training:
-            # use prior if we always use prior, or for evaluation
+        if q_scores_sample is None or self.use_prior:
             c = torch.bmm(align_vectors, memory_bank)
         else:
             c = torch.bmm(q_scores_sample, memory_bank)

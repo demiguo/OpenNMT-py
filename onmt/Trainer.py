@@ -251,6 +251,7 @@ class Trainer(object):
         """
         # Set model in validating mode.
         self.model.eval()
+        use_prior = self.model.decoder.attn.use_prior
 
         stats = Statistics()
 
@@ -295,6 +296,7 @@ class Trainer(object):
 
         # Set model back to training mode.
         self.model.train()
+        self.model.decoder.attn.use_prior = use_prior
 
         return stats
 
