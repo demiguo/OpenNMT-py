@@ -27,8 +27,8 @@ class InferenceNetwork(nn.Module):
             self.src_encoder = src_embeddings
             self.tgt_encoder = tgt_embeddings
         elif inference_network_type == 'brnn':
-            self.src_encoder = RNNEncoder(rnn_type, True, src_layers, rnn_size,
-                                          dropout, src_embeddings, False) 
+            #self.src_encoder = RNNEncoder(rnn_type, True, src_layers, rnn_size,
+            #                              dropout, src_embeddings, False) 
             self.tgt_encoder = RNNEncoder(rnn_type, True, tgt_layers, rnn_size,
                                           dropout, tgt_embeddings, False) 
         elif inference_network_type == 'rnn':
@@ -42,12 +42,14 @@ class InferenceNetwork(nn.Module):
 
         # to parametrize log normal distribution
         if self.dist_type == "normal":
-            # TODO(demi): make 100 configurable
-            self.linear_1 = nn.Linear(rnn_size + rnn_size, 100)
-            self.linear_2 = nn.Linear(100, 100)
-            self.mean_out = nn.Linear(100, 1)
-            self.var_out  = nn.Linear(100, 1)
+            # TODO(demi): make 500 configurable
+            self.linear_1 = nn.Linear(rnn_size + rnn_size, 500)
+            self.linear_2 = nn.Linear(500, 500)
+            self.mean_out = nn.Linear(500, 1)
+            self.std_out  = nn.Linear(500, 1)
             self.softplus = nn.Softplus()
+            self.bn_mu = nn.BatchNorm1d(1, affine=True)
+            self.bn_std = nn.BatchNorm1d(1, affine=True)
 
     def get_normal_scores(self, h_s, h_t):
         """ h_s: [batch x src_length x rnn_size]
@@ -69,22 +71,23 @@ class InferenceNetwork(nn.Module):
         h_enc = self.softplus(self.linear_1(h_fold))
         h_enc = self.softplus(self.linear_2(h_enc))
         
-        h_mean = self.softplus(self.mean_out(h_enc))
-        h_var = self.softplus(self.var_out(h_enc))
+        h_mean = self.bn_mu(self.mean_out(h_enc))
+        h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
-        h_var = h_var.view(tgt_batch, tgt_len, src_len)
-        return [h_mean, h_var]
+        h_std = h_std.view(tgt_batch, tgt_len, src_len)
+        return [h_mean, h_std]
 
-    def forward(self, src, tgt, src_lengths=None):
-        src_final, src_memory_bank = self.src_encoder(src, src_lengths)
-        src_length, batch_size, rnn_size = src_memory_bank.size()
+    def forward(self, src, tgt, src_lengths=None, memory_bank=None):
+        #src_final, src_memory_bank = self.src_encoder(src, src_lengths)
+        #src_length, batch_size, rnn_size = src_memory_bank.size()
+        src_memory_bank = memory_bank.transpose(0,1).transpose(1,2)
         tgt_final, tgt_memory_bank = self.tgt_encoder(tgt)
-        src_memory_bank = src_memory_bank.transpose(0,1) # batch_size, src_length, rnn_size
-        src_memory_bank = src_memory_bank.contiguous().view(-1, rnn_size) # batch_size*src_length, rnn_size
-        src_memory_bank = self.W(src_memory_bank) \
-                              .view(batch_size, src_length, rnn_size)
-        src_memory_bank = src_memory_bank.transpose(1,2) # batch_size, rnn_size, src_length
+        #src_memory_bank = src_memory_bank.transpose(0,1) # batch_size, src_length, rnn_size
+        #src_memory_bank = src_memory_bank.contiguous().view(-1, rnn_size) # batch_size*src_length, rnn_size
+        #src_memory_bank = self.W(src_memory_bank) \
+        #                      .view(batch_size, src_length, rnn_size)
+        #src_memory_bank = src_memory_bank.transpose(1,2) # batch_size, rnn_size, src_length
         tgt_memory_bank = tgt_memory_bank.transpose(0,1) # batch_size, tgt_length, rnn_size
 
         if self.dist_type == "dirichlet":
@@ -99,7 +102,7 @@ class InferenceNetwork(nn.Module):
         elif self.dist_type == "normal":
             # log normal
             src_memory_bank = src_memory_bank.transpose(1, 2)
-            assert src_memory_bank.size() == (batch_size, src_length, rnn_size)
+            #assert src_memory_bank.size() == (batch_size, src_length, rnn_size)
             scores = self.get_normal_scores(src_memory_bank, tgt_memory_bank)
         elif self.dist_type == "none":
             scores = [torch.bmm(tgt_memory_bank, src_memory_bank)]
@@ -111,8 +114,12 @@ class InferenceNetwork(nn.Module):
         if src_lengths is not None:
             mask = sequence_mask(src_lengths)
             mask = mask.unsqueeze(1)
-            for i in range(nparam):
-                scores[i].data.masked_fill_(1-mask, self.mask_val)
+            if self.dist_type == 'normal':
+                scores[0].data.masked_fill_(1-mask, -999)
+                scores[1].data.masked_fill_(1-mask, 0.001)
+            else:
+                for i in range(nparam):
+                    scores[i].data.masked_fill_(1-mask, self.mask_val)
         return scores
 
 
@@ -144,7 +151,7 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
     """
 
     def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None,
-                          q_scores_sample=None):
+                          q_scores_sample=None, q_scores=None):
         """
         See StdRNNDecoder._run_forward_pass() for description
         of arguments and return values.
@@ -168,6 +175,11 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
         attns = {"std": []}
         if q_scores_sample is not None:
             attns["q"] = []
+        if q_scores is not None:
+            attns["q_raw_mean"] = []
+            attns["q_raw_std"] = []
+            attns["p_raw_mean"] = []
+            attns["p_raw_std"] = []
         if self._copy:
             attns["copy"] = []
         if self._coverage:
@@ -180,14 +192,17 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
         src_len = memory_bank.size(0)
 
         hidden = state.hidden
+        [item.fill_(0) for item in hidden]
         coverage = state.coverage.squeeze(0) \
             if state.coverage is not None else None
 
         # Input feed concatenates hidden state with
         # input at every time step.
+        q_scores_mean = q_scores[0].view(batch_size, tgt_len, -1).transpose(0,1)
+        q_scores_std = q_scores[1].view(batch_size, tgt_len, -1).transpose(0,1)
         for i, emb_t in enumerate(emb.split(1)):
             emb_t = emb_t.squeeze(0)
-            decoder_input = torch.cat([emb_t, input_feed], 1)
+            decoder_input = torch.cat([emb_t, input_feed*0], 1)
 
             rnn_output, hidden = self.rnn(decoder_input, hidden)
             if q_scores_sample is not None:
@@ -199,6 +214,12 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
                 memory_bank.transpose(0, 1),
                 memory_lengths=memory_lengths,
                 q_scores_sample=q_sample)
+            if q_sample is not None:
+                attns["q"] += [q_sample]
+                attns["q_raw_mean"] += [q_scores_mean[i]]
+                attns["q_raw_std"] += [q_scores_std[i]]
+                attns["p_raw_mean"] += [raw_scores[0].view(-1, src_len)]
+                attns["p_raw_std"] += [raw_scores[1].view(-1, src_len)]
 
             # raw_scores: [batch x tgt_len x src_len]
             #assert raw_scores.size() == (batch_size, 1, src_len)
@@ -217,8 +238,6 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
 
             decoder_outputs += [decoder_output]
             attns["std"] += [p_attn]
-            if q_sample is not None:
-                attns["q"] += [q_sample]
 
             # Update the coverage attention.
             if self._coverage:
@@ -239,8 +258,12 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)
             mask = mask.unsqueeze(1)
-            for i in range(n_param):
-                p_a_scores[i].data.masked_fill_(1-mask, 1e-2)
+            if self.dist_type == 'normal':
+                p_a_scores[0].data.masked_fill_(1-mask, -999)
+                p_a_scores[1].data.masked_fill_(1-mask, 0.001)
+            else:
+                for i in range(n_param):
+                    p_a_scores[i].data.masked_fill_(1-mask, 1e-2)
         return hidden, decoder_outputs, attns, p_a_scores
 
     def _build_rnn(self, rnn_type, input_size,
@@ -310,7 +333,7 @@ class ViNMTModel(nn.Module):
             src, memory_bank, enc_final)
         if self.inference_network is not None:
             # inference network q(z|x,y)
-            q_scores = self.inference_network(src, tgt, lengths) # batch_size, tgt_length, src_length
+            q_scores = self.inference_network(src, tgt, lengths, memory_bank) # batch_size, tgt_length, src_length
             q_nparam = len(q_scores)
             src_length = q_scores[0].size(2)
             if self.dist_type != "none":
@@ -324,7 +347,7 @@ class ViNMTModel(nn.Module):
                 else:
                     raise Exception("Unsupported dist_type")
                 if self.dist_type == 'normal':
-                    q_scores_sample = F.softmax(m.rsample().cuda()).view(batch_size, tgt_length, -1).transpose(0,1)
+                    q_scores_sample = F.softmax(m.rsample().cuda(), dim=-1).view(batch_size, tgt_length, -1).transpose(0,1)
                 else:
                     q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
             else:
@@ -337,7 +360,7 @@ class ViNMTModel(nn.Module):
                          enc_state if dec_state is None
                          else dec_state,
                          memory_lengths=lengths,
-                         q_scores_sample=q_scores_sample)
+                         q_scores_sample=q_scores_sample, q_scores=q_scores)
 
         if self.multigpu:
             # Not yet supported on multi-gpu

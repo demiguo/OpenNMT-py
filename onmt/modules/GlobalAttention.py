@@ -75,11 +75,13 @@ class GlobalAttention(nn.Module):
             self.v = nn.Linear(dim, 1, bias=False)
 
         if self.dist_type == "normal":
-            self.linear_1 = nn.Linear(dim + dim, 100)
-            self.linear_2 = nn.Linear(100, 100)
+            self.linear_1 = nn.Linear(dim + dim, 500)
+            self.linear_2 = nn.Linear(500, 500)
             self.softplus = torch.nn.Softplus()
-            self.mean_out = nn.Linear(100, 1)
-            self.var_out = nn.Linear(100, 1)
+            self.mean_out = nn.Linear(500, 1)
+            self.std_out = nn.Linear(500, 1)
+            self.bn_mu = nn.BatchNorm1d(1, affine=True)
+            self.bn_std = nn.BatchNorm1d(1, affine=True)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
@@ -152,12 +154,12 @@ class GlobalAttention(nn.Module):
         h_enc = self.softplus(self.linear_1(h_fold))
         h_enc = self.softplus(self.linear_2(h_enc))
         
-        h_mean = self.softplus(self.mean_out(h_enc))
-        h_var = self.softplus(self.var_out(h_enc))
+        h_mean = self.bn_mu(self.mean_out(h_enc))
+        h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
-        h_var = h_var.view(tgt_batch, tgt_len, src_len)
-        return [h_mean, h_var]
+        h_std = h_std.view(tgt_batch, tgt_len, src_len)
+        return [h_mean, h_std]
 
     def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):
         """

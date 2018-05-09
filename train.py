@@ -260,6 +260,9 @@ def train_model(model, fields, optim, data_type, model_opt):
                                        is_train=False)
         valid_stats = trainer.validate(valid_iter)
         print('Validation perplexity: %g' % valid_stats.ppl())
+        print('Validation pppl: %g' % valid_stats.pppl())
+        print('Validation xent: %g' % valid_stats.xent())
+        print('Validation kl: %g' % valid_stats.kl())
         print('Validation accuracy: %g' % valid_stats.accuracy())
 
         # 3. Log to remote server.
@@ -379,6 +382,7 @@ def build_model(model_opt, opt, fields, checkpoint):
 
 
 def build_optim(model, checkpoint):
+    print ('IGNORING INPUT FEED')
     if opt.train_from:
         print('Loading optimizer from checkpoint.')
         optim = checkpoint['optim']

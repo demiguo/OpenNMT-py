@@ -31,7 +31,7 @@ def get_args():
         required=True)
     args.add_argument("--savepath", type=str, default=None)
     args.add_argument("--modelname", type=str, default=None, required=True)
-    args.add_argument("--devid", type=int, default=-1)
+    args.add_argument("--devid", type=int, default=0)
     args.add_argument("--worstn", type=int, default=10)
     return args.parse_args()
 
@@ -77,6 +77,10 @@ else:
     # And attention scores
     nlls = torch.FloatTensor(len(valid))
     attns = []
+    attns_mean = []
+    attns_std = []
+    ps_mean = []
+    ps_std = []
     wordnlls = []
     for i, example in tqdm(enumerate(valid)):
         if i > 5:
@@ -85,9 +89,16 @@ else:
         y = tgtfield.process([example.tgt], device=devid, train=False)
 
         if True:
-            output, attn_dict, decoderstate, (q_scores, p_a_scores) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
+            if model_opt.dist_type == 'normal':
+                output, attn_dict, decoderstate, (q_scores, q_scores_std, p_a_scores, p_a_score_std) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
+            else:
+                output, attn_dict, decoderstate, (q_scores, p_a_scores) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
             #attn = attn_dict["std"]
             attn = attn_dict["q"]
+            attn_mean = attn_dict["q_raw_mean"]
+            attn_std = attn_dict["q_raw_std"]
+            p_mean = attn_dict["p_raw_mean"]
+            p_std = attn_dict["p_raw_std"]
             #import pdb; pdb.set_trace()
 
             lsm = model.generator(output.squeeze(1))
@@ -96,6 +107,10 @@ else:
 
             nlls[i] = bloss.mean().data[0]
             attns.append(attn)
+            attns_mean.append(attn_mean)
+            attns_std.append(attn_std)
+            ps_mean.append(p_mean)
+            ps_std.append(p_std)
             wordnlls.append(bloss)
 
     """
@@ -113,6 +128,10 @@ def visualize_attn():
     for i in [0, 1, 2, 3]:
         example = valid[i]
         attn = attns[i]
+        attn_mean = attns_mean[i]
+        attn_std = attns_std[i]
+        p_mean = ps_mean[i]
+        p_std = ps_std[i]
 
         # unused
         nll = nlls[i]
@@ -122,9 +141,93 @@ def visualize_attn():
         rownames = ["[{}] {} ({:.2f})".format(i, name, wordnll[i].data[0]) for i, name in enumerate(rownames)]
         columnnames = list(example.src)
         columnnames = ["[{}] {}".format(i, name) for i, name in enumerate(columnnames)]
-        title = "Model {} Example {}".format(args.checkpoint_path.split("/")[-2], i)
+        title = "Sampled Q {} Example {}".format(args.checkpoint_path, i)
         vis.heatmap(
             X=attn.data.cpu().squeeze(),
+            opts=dict(
+                rownames=rownames,
+                columnnames=columnnames,
+                colormap="Hot",
+                title=title,
+                width=750,
+                height=750,
+                marginleft=150,
+                marginright=150,
+                margintop=150,
+                marginbottom=150
+            ),
+            win=title
+        )
+        rownames = list(example.tgt) + ["<eos>"]
+        rownames = ["[{}] {} ({:.2f})".format(i, name, wordnll[i].data[0]) for i, name in enumerate(rownames)]
+        columnnames = list(example.src)
+        columnnames = ["[{}] {}".format(i, name) for i, name in enumerate(columnnames)]
+        title = "Raw Mean {} Example {}".format(args.checkpoint_path, i)
+        vis.heatmap(
+            X=attn_mean.data.cpu().squeeze(),
+            opts=dict(
+                rownames=rownames,
+                columnnames=columnnames,
+                colormap="Hot",
+                title=title,
+                width=750,
+                height=750,
+                marginleft=150,
+                marginright=150,
+                margintop=150,
+                marginbottom=150
+            ),
+            win=title
+        )
+        rownames = list(example.tgt) + ["<eos>"]
+        rownames = ["[{}] {} ({:.2f})".format(i, name, wordnll[i].data[0]) for i, name in enumerate(rownames)]
+        columnnames = list(example.src)
+        columnnames = ["[{}] {}".format(i, name) for i, name in enumerate(columnnames)]
+        title = "Raw Std {} Example {}".format(args.checkpoint_path, i)
+        vis.heatmap(
+            X=attn_std.data.cpu().squeeze(),
+            opts=dict(
+                rownames=rownames,
+                columnnames=columnnames,
+                colormap="Hot",
+                title=title,
+                width=750,
+                height=750,
+                marginleft=150,
+                marginright=150,
+                margintop=150,
+                marginbottom=150
+            ),
+            win=title
+        )
+        rownames = list(example.tgt) + ["<eos>"]
+        rownames = ["[{}] {} ({:.2f})".format(i, name, wordnll[i].data[0]) for i, name in enumerate(rownames)]
+        columnnames = list(example.src)
+        columnnames = ["[{}] {}".format(i, name) for i, name in enumerate(columnnames)]
+        title = "P Raw Mean {} Example {}".format(args.checkpoint_path, i)
+        vis.heatmap(
+            X=p_mean.data.cpu().squeeze(),
+            opts=dict(
+                rownames=rownames,
+                columnnames=columnnames,
+                colormap="Hot",
+                title=title,
+                width=750,
+                height=750,
+                marginleft=150,
+                marginright=150,
+                margintop=150,
+                marginbottom=150
+            ),
+            win=title
+        )
+        rownames = list(example.tgt) + ["<eos>"]
+        rownames = ["[{}] {} ({:.2f})".format(i, name, wordnll[i].data[0]) for i, name in enumerate(rownames)]
+        columnnames = list(example.src)
+        columnnames = ["[{}] {}".format(i, name) for i, name in enumerate(columnnames)]
+        title = "P Raw Std {} Example {}".format(args.checkpoint_path, i)
+        vis.heatmap(
+            X=p_std.data.cpu().squeeze(),
             opts=dict(
                 rownames=rownames,
                 columnnames=columnnames,
