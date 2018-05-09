@@ -42,7 +42,7 @@ class InferenceNetwork(nn.Module):
 
         # to parametrize log normal distribution
         if self.dist_type == "normal":
-            # TODO(demi): make 500 configurable
+            # TODO(demi): make 100 configurable
             self.linear_1 = nn.Linear(rnn_size + rnn_size, 500)
             self.linear_2 = nn.Linear(500, 500)
             self.mean_out = nn.Linear(500, 1)
@@ -72,6 +72,7 @@ class InferenceNetwork(nn.Module):
         h_enc = self.softplus(self.linear_2(h_enc))
         
         h_mean = self.bn_mu(self.mean_out(h_enc))
+        #h_mean = self.mean_out(h_enc)
         h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)

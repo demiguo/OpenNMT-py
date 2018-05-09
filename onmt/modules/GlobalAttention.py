@@ -80,8 +80,8 @@ class GlobalAttention(nn.Module):
             self.softplus = torch.nn.Softplus()
             self.mean_out = nn.Linear(500, 1)
             self.std_out = nn.Linear(500, 1)
-            self.bn_mu = nn.BatchNorm1d(1, affine=True)
-            self.bn_std = nn.BatchNorm1d(1, affine=True)
+            #self.bn_mu = nn.BatchNorm1d(1, affine=True)
+            #self.bn_std = nn.BatchNorm1d(1, affine=True)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
@@ -154,8 +154,10 @@ class GlobalAttention(nn.Module):
         h_enc = self.softplus(self.linear_1(h_fold))
         h_enc = self.softplus(self.linear_2(h_enc))
         
-        h_mean = self.bn_mu(self.mean_out(h_enc))
-        h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
+        #h_mean = self.bn_mu(self.mean_out(h_enc))
+        #h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
+        h_mean = self.mean_out(h_enc)
+        h_std = self.softplus(self.std_out(h_enc))
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
         h_std = h_std.view(tgt_batch, tgt_len, src_len)
