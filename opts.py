@@ -168,6 +168,10 @@ def model_opts(parser):
                        help='Train a coverage attention layer.')
     group.add_argument('-lambda_coverage', type=float, default=1,
                        help='Lambda value for coverage.')
+    group.add_argument('-metric', type=str, default='ppl',
+                       choices=['ppl', 'xent_p', 'pppl', 'xent'],
+                       help="""The metric to use to determine lr annealing:
+                       ppl, xent_p, pppl, or xent""")
 
 
 def preprocess_opts(parser):

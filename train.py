@@ -289,7 +289,8 @@ def train_model(model, fields, optim, data_type, model_opt):
             #  ELBO_P = xent_p,
             #  reconstruction_Q = pppl or xent
         # Metric must DECREASE to make progress.
-        trainer.epoch_step(valid_stats.ppl(), epoch)
+        #trainer.epoch_step(valid_stats.ppl(), epoch)
+        trainer.epoch_step(getattr(valid_stats, model_opt.metric)(), epoch)
 
         # 5. Drop a checkpoint if needed.
         if epoch >= opt.start_checkpoint_at:
