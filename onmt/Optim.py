@@ -75,7 +75,8 @@ class Optim(object):
         self.inference_network_params = []
         for k, p in params:
             if p.requires_grad:
-                if "inference_network" in k:
+                if False and "inference_network" in k:
+                    # only use one learning rate, lol
                     self.inference_network_params.append(p)
                 elif self.method != 'sparseadam' or "embed" not in k:
                     self.params.append(p)
@@ -98,11 +99,12 @@ class Optim(object):
         elif self.method == 'adadelta':
             self.optimizer = optim.Adadelta(self.params, lr=self.lr)
         elif self.method == 'adam':
-            self.optimizer = MultipleOptimizer(dict(
-                params=optim.Adam(self.params, lr=self.lr,
-                           betas=self.betas, eps=1e-9),
-                inf_net_params=optim.Adam(self.inference_network_params, lr=self.inf_net_lr, betas=self.betas, eps=1e-9),
-            ))
+            ops = {}
+            if self.params:
+                ops["params"] = optim.Adam(self.params, lr=self.lr, betas=self.betas, eps=1e-9)
+            if self.inference_network_params:
+                ops["inf_net_params"] = optim.Adam(self.inference_network_params, lr=self.inf_net_lr, betas=self.betas, eps=1e-9)
+            self.optimizer = MultipleOptimizer(ops)
         elif self.method == 'sparseadam':
             self.optimizer = MultipleOptimizer(
                 [optim.Adam(self.params, lr=self.lr,
