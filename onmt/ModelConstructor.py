@@ -118,6 +118,8 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     dropout = opt.inference_network_dropout
     scoresFstring = opt.alpha_transformation
     scoresF = scoresF_dict[scoresFstring]
+    natural_gradient = opt.inference_network_natural_gradient > 0
+    normalization = opt.inference_network_normalization
 
     print ('    * inference network type: %s'%inference_network_type)
     print ('    * inference network RNN type: %s'%rnn_type)
@@ -126,14 +128,16 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     print ('    * inference network src layers: %s'%inference_network_src_layers)
     print ('    * inference network tgt layers: %s'%inference_network_tgt_layers)
     print ('    * inference network alpha trans: %s'%scoresFstring)
+    print ('    * inference network natural gradient: %s'%natural_gradient)
+    print ('    * inference network normalization: %s'%normalization)
     print ('    * TODO: RNN\'s could be possibly shared')
 
     return InferenceNetwork(inference_network_type,
                             src_embeddings, tgt_embeddings,
                             rnn_type, inference_network_src_layers,
                             inference_network_tgt_layers, rnn_size, dropout,
-                            opt.dist_type, opt.inference_network_natural_gradient > 0,
-                            scoresF=scoresF)
+                            dist_type=opt.dist_type, use_natural=natural_gradient,
+                            scoresF=scoresF, normalization=normalization)
 
 
 def make_decoder(opt, embeddings):

@@ -16,13 +16,14 @@ from onmt.Models import MeanEncoder, RNNEncoder, InputFeedRNNDecoder, NMTModel
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
                  rnn_type, src_layers, tgt_layers, rnn_size, dropout,
-                 dist_type="none", use_natural=False, scoresF=F.softplus):
+                 dist_type="none", use_natural=False, scoresF=F.softplus, normalization="none"):
         super(InferenceNetwork, self).__init__()
         self.inference_network_type = inference_network_type
         self.dist_type = dist_type
 
         # natural gradient update
         self.use_natural = use_natural
+        self.normalization = normalization
 
         self.scoresF = scoresF
 
@@ -56,6 +57,13 @@ class InferenceNetwork(nn.Module):
             self.mean_out = nn.Linear(100, 1)
             self.var_out  = nn.Linear(100, 1)
             self.softplus = nn.Softplus()
+        elif self.dist_type == "dirichlet":
+            if self.normalization == "none":
+                self.bn_alpha = None
+            elif self.normalization == "bn":
+                self.bn_alpha = nn.BatchNorm1d(1, affine=True)
+            else:
+                raise Exception("Invalid normalization type")
 
     def get_log_normal_scores(self, h_s, h_t):
         """ h_s: [batch x src_length x rnn_size]
@@ -101,13 +109,9 @@ class InferenceNetwork(nn.Module):
 
         if self.dist_type == "dirichlet":
             scores = torch.bmm(tgt_memory_bank, src_memory_bank)
-            #print("max: {}, min: {}".format(scores.max(), scores.min()))
-            # affine
-            #scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
-            # exp
-            #scores = scores.clamp(1e-2, 5).exp() # this one works in prior
-            #scores = scores.clamp(-2, 5).exp()
-            #scores = scores.clamp(min=1e-2)
+            if self.bn_alpha is not None:
+                N, T, S = scores.size()
+                scores = self.bn_alpha(scores.view(-1, 1)).view(N, T, S)
             scores = self.scoresF(scores)
 
             if self.use_natural:

@@ -99,6 +99,10 @@ def model_opts(parser):
 
     # Inference Network options
     group = parser.add_argument_group('Inference Network')
+    group.add_argument("-inference_network_normalization", default="none",
+                       choices=["none", "bn"],
+                       help="""Normalization type in the inference network.
+                       """)
     group.add_argument("-freeze_generative_model", type=int, default=0,
                        help="""Freeze the generative model, except the attn prior.
                        """)
