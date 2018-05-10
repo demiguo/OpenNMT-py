@@ -61,7 +61,7 @@ class InferenceNetwork(nn.Module):
             if self.normalization == "none":
                 self.bn_alpha = None
             elif self.normalization == "bn":
-                self.bn_alpha = nn.BatchNorm1d(1, affine=True)
+                self.bn_alpha = nn.BatchNorm1d(1, affine=False)
             else:
                 raise Exception("Invalid normalization type")
 
