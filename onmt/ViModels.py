@@ -193,7 +193,7 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
         src_len = memory_bank.size(0)
 
         hidden = state.hidden
-        [item.fill_(0) for item in hidden]
+        #[item.fill_(0) for item in hidden]
         coverage = state.coverage.squeeze(0) \
             if state.coverage is not None else None
 
@@ -203,7 +203,7 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
         q_scores_std = q_scores[1].view(batch_size, tgt_len, -1).transpose(0,1)
         for i, emb_t in enumerate(emb.split(1)):
             emb_t = emb_t.squeeze(0)
-            decoder_input = torch.cat([emb_t, input_feed*0], 1)
+            decoder_input = torch.cat([emb_t, input_feed], 1)
 
             rnn_output, hidden = self.rnn(decoder_input, hidden)
             if q_scores_sample is not None:
@@ -325,7 +325,7 @@ class ViNMTModel(nn.Module):
                  * dictionary attention dists of `[tgt_len x batch x src_len]`
                  * final decoder state
         """
-
+        inftgt = tgt[1:]
         tgt = tgt[:-1]  # exclude last target from inputs
         tgt_length, batch_size, rnn_size = tgt.size()
 
@@ -334,6 +334,7 @@ class ViNMTModel(nn.Module):
             src, memory_bank, enc_final)
         if self.inference_network is not None:
             # inference network q(z|x,y)
+            #q_scores = self.inference_network(src, inftgt, lengths, memory_bank) # batch_size, tgt_length, src_length
             q_scores = self.inference_network(src, tgt, lengths, memory_bank) # batch_size, tgt_length, src_length
             q_nparam = len(q_scores)
             src_length = q_scores[0].size(2)
@@ -349,6 +350,7 @@ class ViNMTModel(nn.Module):
                     raise Exception("Unsupported dist_type")
                 if self.dist_type == 'normal':
                     q_scores_sample = F.softmax(m.rsample().cuda(), dim=-1).view(batch_size, tgt_length, -1).transpose(0,1)
+                    #q_scores_sample = F.dropout(q_scores_sample, p=0.1, training=self.training)
                 else:
                     q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
             else:
