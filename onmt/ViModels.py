@@ -33,8 +33,8 @@ class InferenceNetwork(nn.Module):
             self.tgt_encoder = RNNEncoder(rnn_type, True, tgt_layers, rnn_size,
                                           dropout, tgt_embeddings, False) 
         elif inference_network_type == 'rnn':
-            self.src_encoder = RNNEncoder(rnn_type, False, src_layers, rnn_size,
-                                          dropout, src_embeddings, False) 
+            #self.src_encoder = RNNEncoder(rnn_type, False, src_layers, rnn_size,
+            #                              dropout, src_embeddings, False) 
             self.tgt_encoder = RNNEncoder(rnn_type, False, tgt_layers, rnn_size,
                                           dropout, tgt_embeddings, False) 
 
@@ -73,8 +73,11 @@ class InferenceNetwork(nn.Module):
         h_enc = self.softplus(self.linear_2(h_enc))
         
         h_mean = self.bn_mu(self.mean_out(h_enc))
+        #h_mean = F.dropout(h_mean, p=0.1, training=self.training)
         #h_mean = self.mean_out(h_enc)
+        #h_std = self.softplus(0.1*self.bn_std(self.std_out(h_enc)))
         h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
+        #h_std = torch.exp(self.bn_std(self.std_out(h_enc)))
         #h_std = self.softplus(self.std_out(h_enc))
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
