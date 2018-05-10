@@ -18,13 +18,14 @@ class InferenceNetwork(nn.Module):
                  dist_type="none"):
         super(InferenceNetwork, self).__init__()
         self.dist_type = dist_type
+        self.inference_network_type = inference_network_type
         if dist_type == "none":
             self.mask_val = float("-inf")
         else:
             self.mask_val = 1e-2
 
         if inference_network_type == 'embedding_only':
-            self.src_encoder = src_embeddings
+            #self.src_encoder = src_embeddings
             self.tgt_encoder = tgt_embeddings
         elif inference_network_type == 'brnn':
             #self.src_encoder = RNNEncoder(rnn_type, True, src_layers, rnn_size,
@@ -74,6 +75,7 @@ class InferenceNetwork(nn.Module):
         h_mean = self.bn_mu(self.mean_out(h_enc))
         #h_mean = self.mean_out(h_enc)
         h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
+        #h_std = self.softplus(self.std_out(h_enc))
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
         h_std = h_std.view(tgt_batch, tgt_len, src_len)
@@ -83,7 +85,10 @@ class InferenceNetwork(nn.Module):
         #src_final, src_memory_bank = self.src_encoder(src, src_lengths)
         #src_length, batch_size, rnn_size = src_memory_bank.size()
         src_memory_bank = memory_bank.transpose(0,1).transpose(1,2)
-        tgt_final, tgt_memory_bank = self.tgt_encoder(tgt)
+        if self.inference_network_type == 'embedding_only':
+            tgt_memory_bank = self.tgt_encoder(tgt)
+        else:
+            tgt_final, tgt_memory_bank = self.tgt_encoder(tgt)
         #src_memory_bank = src_memory_bank.transpose(0,1) # batch_size, src_length, rnn_size
         #src_memory_bank = src_memory_bank.contiguous().view(-1, rnn_size) # batch_size*src_length, rnn_size
         #src_memory_bank = self.W(src_memory_bank) \
@@ -334,8 +339,8 @@ class ViNMTModel(nn.Module):
             src, memory_bank, enc_final)
         if self.inference_network is not None:
             # inference network q(z|x,y)
-            #q_scores = self.inference_network(src, inftgt, lengths, memory_bank) # batch_size, tgt_length, src_length
-            q_scores = self.inference_network(src, tgt, lengths, memory_bank) # batch_size, tgt_length, src_length
+            q_scores = self.inference_network(src, inftgt, lengths, memory_bank) # batch_size, tgt_length, src_length
+            #q_scores = self.inference_network(src, tgt, lengths, memory_bank) # batch_size, tgt_length, src_length
             q_nparam = len(q_scores)
             src_length = q_scores[0].size(2)
             if self.dist_type != "none":
