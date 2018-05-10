@@ -166,6 +166,8 @@ class NMTLossCompute(LossComputeBase):
         super(NMTLossCompute, self).__init__(generator, tgt_vocab)
         assert (label_smoothing >= 0.0 and label_smoothing <= 1.0)
 
+        self.alpha = None
+
         # TODO(demi): change this, add KL loss for inference network
         self.dist_type = dist_type
         if label_smoothing > 0:
@@ -304,7 +306,10 @@ class NMTLossCompute(LossComputeBase):
         else:
             raise Exception("Unsupported dist_type")
 
-        loss = xent + kl
+        if self.alpha is not None:
+            loss = xent + self.alpha * kl
+        else:
+            loss = xent + kl
 
         if self.confidence < 1:
             # Default: report smoothed ppl.

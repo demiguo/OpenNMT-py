@@ -237,7 +237,8 @@ def train_model(model, fields, optim, data_type, model_opt):
 
     trainer = onmt.Trainer(model, train_loss, valid_loss, optim,
                            trunc_size, shard_size, data_type,
-                           norm_method, grad_accum_count)
+                           norm_method, grad_accum_count,
+                           q_warmup_steps=model_opt.q_warmup_steps)
 
     print('\nStart training...')
     print(' * number of epochs: %d, starting from Epoch %d' %

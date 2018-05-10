@@ -12,6 +12,9 @@ users of this library) for the strategy things we do.
 import time
 import sys
 import math
+
+from collections import defaultdict
+
 import torch
 import torch.nn as nn
 
@@ -125,7 +128,8 @@ class Trainer(object):
 
     def __init__(self, model, train_loss, valid_loss, optim,
                  trunc_size=0, shard_size=32, data_type='text',
-                 norm_method="sents", grad_accum_count=1):
+                 norm_method="sents", grad_accum_count=1,
+                 q_warmup_steps=0):
         # Basic attributes.
         self.model = model
         self.train_loss = train_loss
@@ -137,6 +141,12 @@ class Trainer(object):
         self.norm_method = norm_method
         self.grad_accum_count = grad_accum_count
         self.progress_step = 0
+
+        self.q_warmup_steps = q_warmup_steps
+        self.alphas = defaultdict(lambda: 1)
+        if q_warmup_steps > 0:
+            for i, x in enumerate(torch.range(0, 1, 1 / q_warmup_steps).tolist()):
+                self.alphas[i] = x
 
         assert(grad_accum_count > 0)
         if grad_accum_count > 1:
@@ -329,6 +339,7 @@ class Trainer(object):
                     self.model(src, tgt, src_lengths, dec_state)
 
                 # 3. Compute loss in shards for memory efficiency.
+                self.train_loss.alpha = self.alphas[self.progress_step]
                 batch_stats = self.train_loss.sharded_compute_loss(
                         batch, outputs, attns, j,
                         trunc_size, self.shard_size, normalization, dist_scores=dist_scores)
