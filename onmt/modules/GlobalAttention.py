@@ -80,9 +80,9 @@ class GlobalAttention(nn.Module):
                 self.v_mu = self.v
                 self.v_sigma = nn.Linear(dim, 1, bias=False)
         elif self.attn_type == "mlp":
-            self.linear_context = nn.Linear(dim, dim, bias=False)
-            self.linear_query = nn.Linear(dim, dim, bias=True)
-            self.v = nn.Linear(dim, 1, bias=False)
+            #self.linear_context = nn.Linear(dim, dim, bias=False)
+            #self.linear_query = nn.Linear(dim, dim, bias=True)
+            #self.v = nn.Linear(dim, 1, bias=False)
             if self.dist_type == "normal":
                 self.linear_1 = nn.Linear(dim + dim, 500)
                 self.linear_2 = nn.Linear(500, 500)
@@ -90,9 +90,9 @@ class GlobalAttention(nn.Module):
                 self.mean_out = nn.Linear(500, 1)
                 self.std_out = nn.Linear(500, 1)
 
-        if self.dist_type == "normal":
-            self.bn_mu = nn.BatchNorm1d(1, affine=True)
-            self.bn_std = nn.BatchNorm1d(1, affine=True)
+        #if self.dist_type == "normal":
+            #self.bn_mu = nn.BatchNorm1d(1, affine=True)
+            #self.bn_std = nn.BatchNorm1d(1, affine=True)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
@@ -100,10 +100,10 @@ class GlobalAttention(nn.Module):
         self.sm = nn.Softmax(dim=1)
         self.tanh = nn.Tanh()
     
-        self.mean_norm_alpha = nn.Parameter(torch.Tensor([1]))
-        self.std_norm_alpha = nn.Parameter(torch.Tensor([1]))
-        self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
-        self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
+        #self.mean_norm_alpha = nn.Parameter(torch.Tensor([1]))
+        #self.std_norm_alpha = nn.Parameter(torch.Tensor([1]))
+        #self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
+        #self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
 
         if coverage:
             self.linear_cover = nn.Linear(1, dim, bias=False)
