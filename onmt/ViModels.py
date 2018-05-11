@@ -19,8 +19,15 @@ class InferenceNetwork(nn.Module):
         super(InferenceNetwork, self).__init__()
         self.dist_type = dist_type
         self.inference_network_type = inference_network_type
-        self.norm_alpha = norm_alpha
-        self.norm_beta = norm_beta
+
+        # trainable alpha and beta
+        if True:
+            self.norm_alpha = nn.Parameter(torch.FloatTensor([1.]))
+            self.norm_beta = nn.Parameter(torch.FloatTensor([1.]))
+        else:
+            self.norm_alpha = norm_alpha
+            self.norm_beta = norm_beta
+
         if dist_type == "none":
             self.mask_val = float("-inf")
         else:
@@ -51,8 +58,10 @@ class InferenceNetwork(nn.Module):
             self.mean_out = nn.Linear(500, 1)
             self.std_out  = nn.Linear(500, 1)
             self.softplus = nn.Softplus()
-            self.bn_mu = nn.BatchNorm1d(1, affine=True)
-            self.bn_std = nn.BatchNorm1d(1, affine=True)
+            
+            # use layer norm instead of batch norm now
+            #self.bn_mu = nn.BatchNorm1d(1, affine=True)
+            #self.bn_std = nn.BatchNorm1d(1, affine=True)
 
     def get_normal_scores(self, h_s, h_t):
         """ h_s: [batch x src_length x rnn_size]
@@ -74,11 +83,11 @@ class InferenceNetwork(nn.Module):
         h_enc = self.softplus(self.linear_1(h_fold))
         h_enc = self.softplus(self.linear_2(h_enc))
         
-        h_mean = self.bn_mu(self.mean_out(h_enc))
+        h_mean = self.mean_out(h_enc)
         #h_mean = F.dropout(h_mean, p=0.1, training=self.training)
         #h_mean = self.mean_out(h_enc)
         #h_std = self.softplus(0.1*self.bn_std(self.std_out(h_enc)))
-        h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
+        h_std = self.softplus(self.std_out(h_enc))
         #h_std = torch.exp(self.bn_std(self.std_out(h_enc)))
         #h_std = self.softplus(self.std_out(h_enc))
         
