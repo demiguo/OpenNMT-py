@@ -112,10 +112,15 @@ class InferenceNetwork(nn.Module):
             h_std = self.std_out(h_enc)
             #h_std = torch.exp(self.bn_std(self.std_out(h_enc)))
             #h_std = self.softplus(self.std_out(h_enc))
+
+            # BN
+            h_mean = self.bn_mu(h_mean)
+            h_std = self.softplus(self.bn_std(h_std))
             
             h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
             h_std = h_std.view(tgt_batch, tgt_len, src_len)
-               
+
+            """
             h_mean_row_mean = torch.mean(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
             h_mean_row_std = torch.std(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
             
@@ -125,6 +130,7 @@ class InferenceNetwork(nn.Module):
             h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
             h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
             h_std = self.softplus(h_std)
+            """
             
             return [h_mean, h_std]
 
