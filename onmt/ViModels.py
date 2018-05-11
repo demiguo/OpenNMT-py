@@ -89,7 +89,7 @@ class InferenceNetwork(nn.Module):
         h_mean_row_std = torch.std(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
         
         h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
-        h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgT_len, src_len)
+        h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
 
         alpha = self.norm_alpha
         beta = self.norm_beta
