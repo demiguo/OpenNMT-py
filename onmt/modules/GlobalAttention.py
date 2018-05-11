@@ -88,6 +88,11 @@ class GlobalAttention(nn.Module):
 
         self.sm = nn.Softmax(dim=1)
         self.tanh = nn.Tanh()
+    
+        self.mean_norm_alpha = nn.Parameter(torch.Tensor([1]))
+        self.std_norm_alpha = nn.Parameter(torch.Tensor([1]))
+        self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
+        self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
 
         if coverage:
             self.linear_cover = nn.Linear(1, dim, bias=False)
@@ -161,6 +166,12 @@ class GlobalAttention(nn.Module):
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
         h_std = h_std.view(tgt_batch, tgt_len, src_len)
+
+        h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+        h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+
+        h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
+        h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
         return [h_mean, h_std]
 
     def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):
