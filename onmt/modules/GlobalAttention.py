@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from onmt.Utils import aeq, sequence_mask
-
+import torch.nn.functional as F
 
 class GlobalAttention(nn.Module):
     """
@@ -64,24 +64,35 @@ class GlobalAttention(nn.Module):
         self.dim = dim
         self.attn_type = attn_type
         self.dist_type = dist_type
-        assert (self.attn_type in ["dot", "general", "mlp"]), (
-                "Please select a valid attention type.")
+        assert (self.attn_type in ["dot", "general", "mlp", "mlpadd", "dotmlp"]), \
+            ("Please select a valid attention type.")
 
         if self.attn_type == "general":
             self.linear_in = nn.Linear(dim, dim, bias=False)
+            if self.dist_type == "normal":
+                self.W_mu = self.linear_in
+                self.W_sigma = nn.Linear(dim, dim, bias=False)
+        elif self.attn_type == "mlpadd":
+            self.linear_context = nn.Linear(dim, dim, bias=False)
+            self.linear_query = nn.Linear(dim, dim, bias=True)
+            self.v = nn.Linear(dim, 1, bias=False)
+            if self.dist_type == "normal":
+                self.v_mu = self.v
+                self.v_sigma = nn.Linear(dim, 1, bias=False)
         elif self.attn_type == "mlp":
             self.linear_context = nn.Linear(dim, dim, bias=False)
             self.linear_query = nn.Linear(dim, dim, bias=True)
             self.v = nn.Linear(dim, 1, bias=False)
+            if self.dist_type == "normal":
+                self.linear_1 = nn.Linear(dim + dim, 500)
+                #self.linear_2 = nn.Linear(500, 500)
+                self.softplus = torch.nn.Softplus()
+                self.mean_out = nn.Linear(500, 1)
+                self.std_out = nn.Linear(500, 1)
 
         if self.dist_type == "normal":
-            self.linear_1 = nn.Linear(dim + dim, 500)
-            self.linear_2 = nn.Linear(500, 500)
-            self.softplus = torch.nn.Softplus()
-            self.mean_out = nn.Linear(500, 1)
-            self.std_out = nn.Linear(500, 1)
-            #self.bn_mu = nn.BatchNorm1d(1, affine=True)
-            #self.bn_std = nn.BatchNorm1d(1, affine=True)
+            self.bn_mu = nn.BatchNorm1d(1, affine=True)
+            self.bn_std = nn.BatchNorm1d(1, affine=True)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
@@ -139,29 +150,70 @@ class GlobalAttention(nn.Module):
         """
             For log normal.
         """
-        src_batch, src_len, src_dim = h_s.size()
-        tgt_batch, tgt_len, tgt_dim = h_t.size()
-        aeq(src_batch, tgt_batch)
-        aeq(src_dim, tgt_dim)
-        aeq(self.dim, src_dim)
-        
-        h_t_expand = h_t.unsqueeze(2).expand(-1, -1, src_len, -1)
-        h_s_expand = h_s.unsqueeze(1).expand(-1, tgt_len, -1, -1)
-        # [batch, tgt_len, src_len, src_dim]
-        h_expand = torch.cat((h_t_expand, h_s_expand), dim=3)
-        h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
-        
-        h_enc = self.softplus(self.linear_1(h_fold))
-        h_enc = self.softplus(self.linear_2(h_enc))
-        
-        #h_mean = self.bn_mu(self.mean_out(h_enc))
-        #h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
-        h_mean = self.mean_out(h_enc)
-        h_std = self.softplus(self.std_out(h_enc))
-        
-        h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
-        h_std = h_std.view(tgt_batch, tgt_len, src_len)
-        return [h_mean, h_std]
+        if self.attn_type == "mlp":
+            src_batch, src_len, src_dim = h_s.size()
+            tgt_batch, tgt_len, tgt_dim = h_t.size()
+            aeq(src_batch, tgt_batch)
+            aeq(src_dim, tgt_dim)
+            aeq(self.dim, src_dim)
+            
+            h_t_expand = h_t.unsqueeze(2).expand(-1, -1, src_len, -1)
+            h_s_expand = h_s.unsqueeze(1).expand(-1, tgt_len, -1, -1)
+            # [batch, tgt_len, src_len, src_dim]
+            h_expand = torch.cat((h_t_expand, h_s_expand), dim=3)
+            h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
+            
+            h_enc = self.softplus(self.linear_1(h_fold))
+            #h_enc = self.softplus(self.linear_2(h_enc))
+            
+            #h_mean = self.bn_mu(self.mean_out(h_enc))
+            #h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
+
+            h_mean = self.mean_out(h_enc)
+            h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+            #h_mean = h_mean - h_mean.mean(2, keepdim=True)
+
+            h_std = self.softplus(self.std_out(h_enc))
+            h_std = h_std.view(tgt_batch, tgt_len, src_len)
+            return [h_mean, h_std]
+        elif self.attn_type == "mlpadd":
+            H = self.dim
+            Ns, S, Hs = h_s.size()
+            Nt, T, Ht = h_t.size()
+            aeq(Ns, Nt)
+            aeq(Hs, Ht)
+            aeq(Hs, H)
+                                                                               
+            wq = self.linear_query(h_t.view(-1, H))
+            wq = wq.view(Nt, T, 1, H).expand(Nt, T, S, H)
+
+            uh = self.linear_context(h_s.contiguous().view(-1, H))
+            uh = uh.view(Ns, 1, S, H).expand(Ns, T, S, H)
+
+            wquh = F.softplus(wq + uh)
+
+            h_mu = self.v_mu(wquh.view(-1, H)).view(Nt, T, S)
+            #h_mu_un = self.v_mu(wquh.view(-1, H)).view(Nt, T, S)
+            #h_mu_mean = h_mu_un.mean(2, keepdim=True)
+            #h_mu = h_mu_un - h_mu_mean
+            h_sigma = F.softplus(self.v_sigma(wquh.view(-1, H)).view(Nt, T, S))
+
+            return [h_mu, h_sigma]
+        elif self.attn_type == "general":
+            H = self.dim
+            Ns, S, Hs = h_s.size()
+            Nt, T, Ht = h_t.size()
+            aeq(Ns, Nt)
+            aeq(Hs, Ht)
+            aeq(Hs, H)
+
+            h_t = h_t.contiguous()
+            h_t_mu = self.W_mu(h_t.view(Nt * T, Ht)).view(Nt, T, H)
+            h_t_sigma = self.W_sigma(h_t.view(Nt * T, Ht)).view(Nt, T, H)
+
+            h_s_ = h_s.transpose(1, 2)
+            return [torch.bmm(h_t_mu, h_s_), torch.bmm(h_t_sigma, h_s_)]
+
 
     def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):
         """
@@ -208,12 +260,11 @@ class GlobalAttention(nn.Module):
 
         # compute attention scores, as in Luong et al.
         #align = self.score(input, memory_bank)
-        align = self.score(input, memory_bank)
 
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)
             mask = mask.unsqueeze(1)  # Make it broadcastable.
-            align.data.masked_fill_(1 - mask, -float('inf'))
+            #align.data.masked_fill_(1 - mask, -float('inf'))
 
         # Softmax to normalize attention weights
         if self.dist_type == "dirichlet":
@@ -222,8 +273,8 @@ class GlobalAttention(nn.Module):
             raw_scores = self.get_raw_scores(input, memory_bank)
         else:
             raw_scores = [align]
-        align_vectors = self.sm(align.view(batch*targetL, sourceL))
-        align_vectors = align_vectors.view(batch, targetL, sourceL)
+        #align_vectors = self.sm(align.view(batch*targetL, sourceL))
+        #align_vectors = align_vectors.view(batch, targetL, sourceL)
 
         # each context vector c_t is the weighted average
         # over all the source hidden states
@@ -241,6 +292,7 @@ class GlobalAttention(nn.Module):
 
         if one_step:
             attn_h = attn_h.squeeze(1)
+            """
             align_vectors = align_vectors.squeeze(1)
 
             # Check output sizes
@@ -250,8 +302,10 @@ class GlobalAttention(nn.Module):
             batch_, sourceL_ = align_vectors.size()
             aeq(batch, batch_)
             aeq(sourceL, sourceL_)
+            """
         else:
             attn_h = attn_h.transpose(0, 1).contiguous()
+            """
             align_vectors = align_vectors.transpose(0, 1).contiguous()
 
             # Check output sizes
@@ -263,5 +317,6 @@ class GlobalAttention(nn.Module):
             aeq(targetL, targetL_)
             aeq(batch, batch_)
             aeq(sourceL, sourceL_)
-
-        return attn_h, align_vectors, raw_scores
+            """
+        #return attn_h, align_vectors, raw_scores
+        return attn_h, q_scores_sample, raw_scores

@@ -55,7 +55,7 @@ class Statistics(object):
         return self._xent / self.n_words
 
     def ppl(self):
-        return math.exp(min(self.loss / self.n_words, 100))
+        return math.exp(min((self._xent + self._kl) / self.n_words, 100))
 
     def kl(self):
         return self._kl / self.n_words
@@ -129,6 +129,7 @@ class Trainer(object):
     def __init__(self, model, train_loss, valid_loss, optim,
                  trunc_size=0, shard_size=32, data_type='text',
                  norm_method="sents", grad_accum_count=1,
+                 alpha_start=0,
                  q_warmup_steps=0):
         # Basic attributes.
         self.model = model
@@ -142,10 +143,11 @@ class Trainer(object):
         self.grad_accum_count = grad_accum_count
         self.progress_step = 0
 
+        self.alpha_start = alpha_start
         self.q_warmup_steps = q_warmup_steps
         self.alphas = defaultdict(lambda: 1)
         if q_warmup_steps > 0:
-            for i, x in enumerate(torch.range(0, 1, 1 / q_warmup_steps).tolist()):
+            for i, x in enumerate(torch.range(alpha_start, 1, 1 / q_warmup_steps).tolist()):
                 self.alphas[i] = x
 
         assert(grad_accum_count > 0)

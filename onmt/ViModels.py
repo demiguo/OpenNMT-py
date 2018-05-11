@@ -15,10 +15,13 @@ from onmt.Models import RNNEncoder, InputFeedRNNDecoder, NMTModel
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
                  rnn_type, src_layers, tgt_layers, rnn_size, dropout,
-                 dist_type="none"):
+                 attn_type="mlp", dist_type="none"):
         super(InferenceNetwork, self).__init__()
+        self.attn_type = attn_type
         self.dist_type = dist_type
         self.inference_network_type = inference_network_type
+
+        # meh?
         if dist_type == "none":
             self.mask_val = float("-inf")
         else:
@@ -42,13 +45,35 @@ class InferenceNetwork(nn.Module):
         self.rnn_size = rnn_size
 
         # to parametrize log normal distribution
+        H = rnn_size
+        if self.attn_type == "general":
+            self.linear_in = nn.Linear(H, H, bias=False)
+            if self.dist_type == "normal":
+                self.W_mu = self.linear_in
+                self.W_sigma = nn.Linear(H, H, bias=False)
+        elif self.attn_type == "mlpadd":
+            self.linear_context = nn.Linear(H, H, bias=False) 
+            self.linear_query = nn.Linear(H, H, bias=True)
+            self.v = nn.Linear(H, 1, bias=False)
+            if self.dist_type == "normal":
+                self.v_mu = self.v
+                self.v_sigma = nn.Linear(H, 1, bias=False)
+        elif self.attn_type == "mlp":
+            if self.dist_type == "normal":
+                # TODO(demi): make 100 configurable
+                self.linear_1 = nn.Linear(rnn_size + rnn_size, 500)
+                #self.linear_2 = nn.Linear(500, 500)
+                self.mean_out = nn.Linear(500, 1)
+                self.std_out  = nn.Linear(500, 1)
+
+                self.softplus = nn.Softplus()
+        elif self.attn_type == "dotmlp":
+            self.linear_in = nn.Linear(H, H, bias=False)
+            if self.dist_type == "normal":
+                self.W_mu = self.linear_in
+            pass
+
         if self.dist_type == "normal":
-            # TODO(demi): make 100 configurable
-            self.linear_1 = nn.Linear(rnn_size + rnn_size, 500)
-            self.linear_2 = nn.Linear(500, 500)
-            self.mean_out = nn.Linear(500, 1)
-            self.std_out  = nn.Linear(500, 1)
-            self.softplus = nn.Softplus()
             self.bn_mu = nn.BatchNorm1d(1, affine=True)
             self.bn_std = nn.BatchNorm1d(1, affine=True)
 
@@ -56,30 +81,75 @@ class InferenceNetwork(nn.Module):
         """ h_s: [batch x src_length x rnn_size]
             h_t: [batch x tgt_length x rnn_size]
         """
-        src_batch, src_len, src_dim = h_s.size()
-        tgt_batch, tgt_len, tgt_dim = h_t.size()
-        aeq(src_batch, tgt_batch)
-        aeq(src_dim, tgt_dim)
-        aeq(self.rnn_size, src_dim)
-        
-        #import pdb; pdb.set_trace()
-        h_t_expand = h_t.unsqueeze(2).expand(-1, -1, src_len, -1)
-        h_s_expand = h_s.unsqueeze(1).expand(-1, tgt_len, -1, -1)
-        # [batch, tgt_len, src_len, src_dim]
-        h_expand = torch.cat((h_t_expand, h_s_expand), dim=3)
-        h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
-        
-        h_enc = self.softplus(self.linear_1(h_fold))
-        h_enc = self.softplus(self.linear_2(h_enc))
-        
-        h_mean = self.bn_mu(self.mean_out(h_enc))
-        #h_mean = self.mean_out(h_enc)
-        h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
-        #h_std = self.softplus(self.std_out(h_enc))
-        
-        h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
-        h_std = h_std.view(tgt_batch, tgt_len, src_len)
-        return [h_mean, h_std]
+
+        if self.attn_type == "mlp":
+            src_batch, src_len, src_dim = h_s.size()
+            tgt_batch, tgt_len, tgt_dim = h_t.size()
+            aeq(src_batch, tgt_batch)
+            aeq(src_dim, tgt_dim)
+            aeq(self.rnn_size, src_dim)
+            
+            #import pdb; pdb.set_trace()
+            h_t_expand = h_t.unsqueeze(2).expand(-1, -1, src_len, -1)
+            h_s_expand = h_s.unsqueeze(1).expand(-1, tgt_len, -1, -1)
+            # [batch, tgt_len, src_len, src_dim]
+            h_expand = torch.cat((h_t_expand, h_s_expand), dim=3)
+            h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
+            
+            h_enc = self.softplus(self.linear_1(h_fold))
+            #h_enc = self.softplus(self.linear_2(h_enc))
+            
+            h_mean = self.bn_mu(self.mean_out(h_enc)).view(tgt_batch, tgt_len, src_len)
+            #h_mean = self.mean_out(h_enc).view(tgt_batch, tgt_len, src_len)
+            #h_mean = h_mean - h_mean.mean(2, keepdim=True)
+
+            h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
+            h_std = self.softplus(self.std_out(h_enc)).view(tgt_batch, tgt_len, src_len)
+            
+            return [h_mean, h_std]
+        elif self.attn_type == "mlpadd":
+            H = self.rnn_size
+            Ns, S, Hs = h_s.size()
+            Nt, T, Ht = h_t.size()
+            aeq(Ns, Nt)
+            aeq(Hs, Ht)
+            aeq(Hs, H)
+
+            wq = self.linear_query(h_t.contiguous().view(-1, H))
+            wq = wq.view(Nt, T, 1, H).expand(Nt, T, S, H)
+
+            uh = self.linear_context(h_s.contiguous().view(-1, H))
+            uh = uh.view(Ns, 1, S, H).expand(Ns, T, S, H)
+
+            wquh = F.softplus(wq + uh)
+
+            h_mu = self.bn_mu(self.v_mu(wquh.view(-1, H))).view(Nt, T, S)
+            #h_mu_un = self.v_mu(wquh.view(-1, H)).view(Nt, T, S)
+            #h_mu_mean = h_mu_un.mean(2, keepdim=True)
+            #h_mu = h_mu_un - h_mu_mean
+            h_sigma = F.softplus(self.bn_std(self.v_sigma(wquh.view(-1, H)))).view(Nt, T, S)
+
+            return [h_mu, h_sigma]
+        elif self.attn_type == "general":
+            H = self.rnn_size
+            Ns, S, Hs = h_s.size()
+            Nt, T, Ht = h_t.size()
+            aeq(Ns, Nt)
+            aeq(Hs, Ht)
+            aeq(Hs, H)
+
+            h_t = h_t.contiguous()
+            h_t_mu = self.W_mu(h_t.view(Nt * T, Ht)).view(Nt, T, H)
+            h_t_sigma = self.W_sigma(h_t.view(Nt * T, Ht)).view(Nt, T, H)
+
+            h_s_ = h_s.transpose(1, 2)
+
+            h_mu = self.bn_mu(torch.bmm(h_t_mu, h_s_).view(-1, 1)).view(Nt, T, S)
+            #h_mu_un = torch.bmm(h_t_mu, h_s_).view(Nt, T, S)
+            #h_mu_mean = h_mu_un.mean(2, keepdim=True)
+            #h_mu = h_mu_un - h_mu_mean
+            h_sigma = F.softplus(self.bn_std(torch.bmm(h_t_sigma, h_s_).view(-1, 1))).view(Nt, T, S)
+            return [h_mu, h_sigma]
 
     def forward(self, src, tgt, src_lengths=None, memory_bank=None):
         #src_final, src_memory_bank = self.src_encoder(src, src_lengths)

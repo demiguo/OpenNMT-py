@@ -129,8 +129,9 @@ def model_opts(parser):
 
     # Attention options
     group = parser.add_argument_group('Model- Attention')
-    group.add_argument('-global_attention', type=str, default='general',
-                       choices=['dot', 'general', 'mlp'],
+    group.add_argument('-global_attention', type=str, #default='general',
+                       default="mlp",
+                       choices=['dot', 'general', 'mlp', "mlpadd", "dotmlp"],
                        help="""The attention type to use:
                        dotprod or general (Luong) or MLP (Bahdanau)""")
 
@@ -359,6 +360,9 @@ def train_opts(parser):
                        Set to zero to turn off label smoothing.
                        For more detailed information, see:
                        https://arxiv.org/abs/1512.00567""")
+    group.add_argument("-alpha_start", type=float, default=0.,
+                       help="""Initial alpha for warmup
+                       """)
     group.add_argument("-q_warmup_steps", type=int, default=0,
                        help="""Number of warmup steps
                        """)
