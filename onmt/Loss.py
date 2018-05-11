@@ -311,6 +311,7 @@ class NMTLossCompute(LossComputeBase):
         else:
             loss = xent + kl
 
+        #loss = xent + kl*0.5
         if self.confidence < 1:
             # Default: report smoothed ppl.
             # loss_data = -log_likelihood.sum(0)

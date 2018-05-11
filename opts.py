@@ -321,7 +321,7 @@ def train_opts(parser):
                        choices=['sgd', 'adagrad', 'adadelta', 'adam',
                                 'sparseadam'],
                        help="""Optimization method.""")
-    group.add_argument('-adagrad_accumulator_init', type=float, default=0,
+    group.add_argument('-adagrad_accumulator_init', type=float, default=0.1,
                        help="""Initializes the accumulator values in adagrad.
                        Mirrors the initial_accumulator_value option
                        in the tensorflow adagrad (use 0.1 for their default).

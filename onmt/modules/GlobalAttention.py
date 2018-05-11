@@ -1,8 +1,32 @@
 import torch
 import torch.nn as nn
 
+from torch.autograd import Function
 from onmt.Utils import aeq, sequence_mask
 
+class MuSigma(Function):
+    # Note that both forward and backward are @staticmethods
+    @staticmethod
+    # bias is an optional argument
+    def forward(ctx, mu, sigma):
+        ctx.save_for_backward(mu, sigma)
+        return mu, sigma
+
+    # This function has only a single output, so it gets only one gradient
+    @staticmethod
+    def backward(ctx, mu_grad_output, sigma_grad_output):
+        mu, sigma = ctx.saved_variables
+        mu_grad_input = sigma_grad_input = None
+        #print ('help')
+
+        if ctx.needs_input_grad[0]:
+            #mu_grad_input = mu_grad_output * sigma
+            mu_grad_input = mu_grad_output
+        if ctx.needs_input_grad[1]:
+            #sigma_grad_input = 2*sigma*sigma*sigma_grad_output
+            sigma_grad_input = sigma_grad_output
+        return mu_grad_input, sigma_grad_input
+musigma = MuSigma.apply
 
 class GlobalAttention(nn.Module):
     """
@@ -80,8 +104,8 @@ class GlobalAttention(nn.Module):
             self.softplus = torch.nn.Softplus()
             self.mean_out = nn.Linear(500, 1)
             self.std_out = nn.Linear(500, 1)
-            #self.bn_mu = nn.BatchNorm1d(1, affine=True)
-            #self.bn_std = nn.BatchNorm1d(1, affine=True)
+            self.bn_mu = nn.BatchNorm1d(1, affine=True)
+            self.bn_std = nn.BatchNorm1d(1, affine=True)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
@@ -161,6 +185,7 @@ class GlobalAttention(nn.Module):
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
         h_std = h_std.view(tgt_batch, tgt_len, src_len)
+        #h_mean, h_std = musigma(h_mean, h_std)
         return [h_mean, h_std]
 
     def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):

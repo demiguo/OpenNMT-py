@@ -329,6 +329,7 @@ class OrderedIterator(torchtext.data.Iterator):
     def create_batches(self):
         if self.train:
             def pool(data, random_shuffler):
+                #for p in torchtext.data.batch(data, self.batch_size * 100 * 16):
                 for p in torchtext.data.batch(data, self.batch_size * 100):
                     p_batch = torchtext.data.batch(
                         sorted(p, key=self.sort_key),

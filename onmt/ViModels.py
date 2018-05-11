@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch.autograd import Variable
+from torch.autograd import Variable, Function
 from torch.nn.utils.rnn import pack_padded_sequence as pack
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
 
@@ -11,6 +11,36 @@ import onmt
 from onmt.Utils import aeq, sequence_mask
 from onmt.Models import RNNEncoder, InputFeedRNNDecoder, NMTModel
 
+class MuSigma(Function):
+    # Note that both forward and backward are @staticmethods
+    @staticmethod
+    # bias is an optional argument
+    def forward(ctx, mu, sigma):
+        ctx.save_for_backward(mu, sigma)
+        return mu, sigma
+
+    # This function has only a single output, so it gets only one gradient
+    @staticmethod
+    def backward(ctx, mu_grad_output, sigma_grad_output):
+        mu, sigma = ctx.saved_variables
+        #print ('----')
+        #print (mu.max())
+        #print (mu.min())
+        #print (mu.mean())
+        #print (sigma.max())
+        #print (sigma.min())
+        #print (sigma.mean())
+        mu_grad_input = sigma_grad_input = None
+        #print ('help')
+
+        if ctx.needs_input_grad[0]:
+            #mu_grad_input = mu_grad_output * sigma
+            mu_grad_input = mu_grad_output
+        if ctx.needs_input_grad[1]:
+            #sigma_grad_input = 2*sigma*sigma*sigma_grad_output
+            sigma_grad_input = sigma_grad_output
+        return mu_grad_input, sigma_grad_input
+musigma = MuSigma.apply
 
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
@@ -82,6 +112,7 @@ class InferenceNetwork(nn.Module):
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
         h_std = h_std.view(tgt_batch, tgt_len, src_len)
+        #h_mean, h_std = musigma(h_mean, h_std)
         return [h_mean, h_std]
 
     def forward(self, src, tgt, src_lengths=None, memory_bank=None):
