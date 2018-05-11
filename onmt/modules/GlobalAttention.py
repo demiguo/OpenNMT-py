@@ -162,7 +162,7 @@ class GlobalAttention(nn.Module):
         #h_mean = self.bn_mu(self.mean_out(h_enc))
         #h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
         h_mean = self.mean_out(h_enc)
-        h_std = self.softplus(self.std_out(h_enc))
+        h_std = self.std_out(h_enc)
         
         h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
         h_std = h_std.view(tgt_batch, tgt_len, src_len)
@@ -175,6 +175,7 @@ class GlobalAttention(nn.Module):
 
         h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
         h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
+        h_std = self.softplus(h_std)
         return [h_mean, h_std]
 
     def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):

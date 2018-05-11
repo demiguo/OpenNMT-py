@@ -86,7 +86,7 @@ class InferenceNetwork(nn.Module):
         #h_mean = F.dropout(h_mean, p=0.1, training=self.training)
         #h_mean = self.mean_out(h_enc)
         #h_std = self.softplus(0.1*self.bn_std(self.std_out(h_enc)))
-        h_std = self.softplus(self.std_out(h_enc))
+        h_std = self.std_out(h_enc)
         #h_std = torch.exp(self.bn_std(self.std_out(h_enc)))
         #h_std = self.softplus(self.std_out(h_enc))
         
@@ -101,6 +101,7 @@ class InferenceNetwork(nn.Module):
 
         h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
         h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
+        h_std = self.softplus(h_std)
         
         return [h_mean, h_std]
 
