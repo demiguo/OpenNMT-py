@@ -21,12 +21,11 @@ class InferenceNetwork(nn.Module):
         self.inference_network_type = inference_network_type
 
         # trainable alpha and beta
-        if True:
-            self.norm_alpha = nn.Parameter(torch.FloatTensor([1.]))
-            self.norm_beta = nn.Parameter(torch.FloatTensor([1.]))
-        else:
-            self.norm_alpha = norm_alpha
-            self.norm_beta = norm_beta
+        self.mean_norm_alpha = nn.Parameter(torch.FloatTensor([1.]))
+        self.mean_norm_beta = nn.Parameter(torch.FloatTensor([0.]))
+        self.std_norm_alpha = nn.Parameter(torch.FloatTensor([1.]))
+        self.std_norm_beta = nn.Parameter(torch.FloatTensor([0.]))
+
 
         if dist_type == "none":
             self.mask_val = float("-inf")
@@ -100,10 +99,8 @@ class InferenceNetwork(nn.Module):
         h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
         h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
 
-        alpha = self.norm_alpha
-        beta = self.norm_beta
-        h_mean = alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + beta
-        h_std = alpha * (h_std - h_std_row_mean) / h_std_row_std + beta
+        h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
+        h_std = self.mean_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
         
         return [h_mean, h_std]
 
