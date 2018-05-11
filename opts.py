@@ -107,6 +107,8 @@ def model_opts(parser):
                         help="""q and p_a distribution type.
                         If 'none', then uses a softmax over scores.
                         """)
+    group.add_argument("-norm_alpha", type=float, default=1.0, help="Layer Normalization alpha factor")
+    group.add_argument("-norm_beta", type=float, default=1.0, help="Layer Normalization beta factor")
     group.add_argument('-inference_network_type', type=str, default='brnn',
                        choices=['rnn', 'brnn', 'embedding_only', 'none'],
                        help="""Type of inference network to use.
