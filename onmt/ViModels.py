@@ -68,7 +68,7 @@ class InferenceNetwork(nn.Module):
             if self.dist_type == "normal":
                 # TODO(demi): make 100 configurable
                 self.linear_1 = nn.Linear(rnn_size + rnn_size, 500)
-                #self.linear_2 = nn.Linear(500, 500)
+                self.linear_2 = nn.Linear(500, 500)
                 self.mean_out = nn.Linear(500, 1)
                 self.std_out  = nn.Linear(500, 1)
 

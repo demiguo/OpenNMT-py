@@ -85,7 +85,7 @@ class GlobalAttention(nn.Module):
             self.v = nn.Linear(dim, 1, bias=False)
             if self.dist_type == "normal":
                 self.linear_1 = nn.Linear(dim + dim, 500)
-                #self.linear_2 = nn.Linear(500, 500)
+                self.linear_2 = nn.Linear(500, 500)
                 self.softplus = torch.nn.Softplus()
                 self.mean_out = nn.Linear(500, 1)
                 self.std_out = nn.Linear(500, 1)
