@@ -123,7 +123,9 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
                             rnn_type, inference_network_src_layers,
                             inference_network_tgt_layers, rnn_size, dropout,
                             attn_type=opt.global_attention,
-                            dist_type=opt.dist_type)
+                            dist_type=opt.dist_type,
+                            norm_alpha=opt.norm_alpha,
+                            norm_beta=opt.norm_beta)
 
 
 def make_decoder(opt, embeddings):

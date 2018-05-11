@@ -99,6 +99,11 @@ class GlobalAttention(nn.Module):
 
         self.sm = nn.Softmax(dim=1)
         self.tanh = nn.Tanh()
+    
+        self.mean_norm_alpha = nn.Parameter(torch.Tensor([1]))
+        self.std_norm_alpha = nn.Parameter(torch.Tensor([1]))
+        self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
+        self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
 
         if coverage:
             self.linear_cover = nn.Linear(1, dim, bias=False)
@@ -164,17 +169,25 @@ class GlobalAttention(nn.Module):
             h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
             
             h_enc = self.softplus(self.linear_1(h_fold))
-            #h_enc = self.softplus(self.linear_2(h_enc))
+            h_enc = self.softplus(self.linear_2(h_enc))
             
             #h_mean = self.bn_mu(self.mean_out(h_enc))
             #h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
-
             h_mean = self.mean_out(h_enc)
+            h_std = self.std_out(h_enc)
+            
             h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
-            #h_mean = h_mean - h_mean.mean(2, keepdim=True)
-
-            h_std = self.softplus(self.std_out(h_enc))
             h_std = h_std.view(tgt_batch, tgt_len, src_len)
+            
+            h_mean_row_mean = torch.mean(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+            h_mean_row_std = torch.std(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+            
+            h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+            h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+
+            h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
+            h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
+            h_std = self.softplus(h_std)
             return [h_mean, h_std]
         elif self.attn_type == "mlpadd":
             H = self.dim

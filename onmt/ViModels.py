@@ -15,13 +15,19 @@ from onmt.Models import RNNEncoder, InputFeedRNNDecoder, NMTModel
 class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
                  rnn_type, src_layers, tgt_layers, rnn_size, dropout,
-                 attn_type="mlp", dist_type="none"):
+                 attn_type="mlp",
+                 dist_type="none", norm_alpha=1.0, norm_beta=1.0):
         super(InferenceNetwork, self).__init__()
         self.attn_type = attn_type
         self.dist_type = dist_type
         self.inference_network_type = inference_network_type
 
-        # meh?
+        # trainable alpha and beta
+        self.mean_norm_alpha = nn.Parameter(torch.FloatTensor([1.]))
+        self.mean_norm_beta = nn.Parameter(torch.FloatTensor([0.]))
+        self.std_norm_alpha = nn.Parameter(torch.FloatTensor([1.]))
+        self.std_norm_beta = nn.Parameter(torch.FloatTensor([0.]))
+
         if dist_type == "none":
             self.mask_val = float("-inf")
         else:
@@ -36,8 +42,8 @@ class InferenceNetwork(nn.Module):
             self.tgt_encoder = RNNEncoder(rnn_type, True, tgt_layers, rnn_size,
                                           dropout, tgt_embeddings, False) 
         elif inference_network_type == 'rnn':
-            self.src_encoder = RNNEncoder(rnn_type, False, src_layers, rnn_size,
-                                          dropout, src_embeddings, False) 
+            #self.src_encoder = RNNEncoder(rnn_type, False, src_layers, rnn_size,
+            #                              dropout, src_embeddings, False) 
             self.tgt_encoder = RNNEncoder(rnn_type, False, tgt_layers, rnn_size,
                                           dropout, tgt_embeddings, False) 
 
@@ -97,16 +103,31 @@ class InferenceNetwork(nn.Module):
             h_fold = h_expand.contiguous().view(-1, src_dim + tgt_dim)
             
             h_enc = self.softplus(self.linear_1(h_fold))
-            #h_enc = self.softplus(self.linear_2(h_enc))
+            h_enc = self.softplus(self.linear_2(h_enc))
             
-            h_mean = self.bn_mu(self.mean_out(h_enc)).view(tgt_batch, tgt_len, src_len)
-            #h_mean = self.mean_out(h_enc).view(tgt_batch, tgt_len, src_len)
-            #h_mean = h_mean - h_mean.mean(2, keepdim=True)
+            h_mean = self.mean_out(h_enc)
+            #h_mean = F.dropout(h_mean, p=0.1, training=self.training)
+            #h_mean = self.mean_out(h_enc)
+            #h_std = self.softplus(0.1*self.bn_std(self.std_out(h_enc)))
+            h_std = self.std_out(h_enc)
+            #h_std = torch.exp(self.bn_std(self.std_out(h_enc)))
+            #h_std = self.softplus(self.std_out(h_enc))
+            
+            h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+            h_std = h_std.view(tgt_batch, tgt_len, src_len)
+               
+            h_mean_row_mean = torch.mean(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+            h_mean_row_std = torch.std(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+            
+            h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+            h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
 
-            h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
-            h_std = self.softplus(self.std_out(h_enc)).view(tgt_batch, tgt_len, src_len)
+            h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
+            h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
+            h_std = self.softplus(h_std)
             
             return [h_mean, h_std]
+
         elif self.attn_type == "mlpadd":
             H = self.rnn_size
             Ns, S, Hs = h_s.size()

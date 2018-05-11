@@ -107,6 +107,8 @@ def model_opts(parser):
                         help="""q and p_a distribution type.
                         If 'none', then uses a softmax over scores.
                         """)
+    group.add_argument("-norm_alpha", type=float, default=1.0, help="Layer Normalization alpha factor")
+    group.add_argument("-norm_beta", type=float, default=1.0, help="Layer Normalization beta factor")
     group.add_argument('-inference_network_type', type=str, default='brnn',
                        choices=['rnn', 'brnn', 'embedding_only', 'none'],
                        help="""Type of inference network to use.
@@ -260,7 +262,7 @@ def train_opts(parser):
     group = parser.add_argument_group('Initialization')
     group.add_argument('-start_epoch', type=int, default=1,
                        help='The epoch from which to start')
-    group.add_argument('-param_init', type=float, default=0.1,
+    group.add_argument('-param_init', type=float, default=0.05,
                        help="""Parameters are initialized over uniform distribution
                        with support (-param_init, param_init).
                        Use 0 to not use initialization""")
