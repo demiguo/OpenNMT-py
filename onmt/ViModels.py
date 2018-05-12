@@ -16,11 +16,13 @@ class InferenceNetwork(nn.Module):
     def __init__(self, inference_network_type, src_embeddings, tgt_embeddings,
                  rnn_type, src_layers, tgt_layers, rnn_size, dropout,
                  attn_type="mlp",
-                 dist_type="none", norm_alpha=1.0, norm_beta=1.0):
+                 dist_type="none", norm_alpha=1.0, norm_beta=1.0,
+                 normalization="bn"):
         super(InferenceNetwork, self).__init__()
         self.attn_type = attn_type
         self.dist_type = dist_type
         self.inference_network_type = inference_network_type
+        self.normalization = normalization
 
         # trainable alpha and beta
         self.mean_norm_alpha = nn.Parameter(torch.FloatTensor([1.]))
@@ -77,11 +79,18 @@ class InferenceNetwork(nn.Module):
             self.linear_in = nn.Linear(H, H, bias=False)
             if self.dist_type == "normal":
                 self.W_mu = self.linear_in
-            pass
+            pass # unfinished
 
-        if self.dist_type == "normal":
-            self.bn_mu = nn.BatchNorm1d(1, affine=True)
-            self.bn_std = nn.BatchNorm1d(1, affine=True)
+        if self.normalization == "bn":
+            if self.dist_type == "normal":
+                self.bn_mu = nn.BatchNorm1d(1, affine=True)
+                self.bn_std = nn.BatchNorm1d(1, affine=True)
+        elif self.normalization == "ln":
+            if self.dist_type == "normal":
+                self.mean_norm_alpha = nn.Parameter(torch.Tensor([1]))
+                self.std_norm_alpha = nn.Parameter(torch.Tensor([1]))
+                self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
+                self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
 
     def get_normal_scores(self, h_s, h_t):
         """ h_s: [batch x src_length x rnn_size]
@@ -113,28 +122,32 @@ class InferenceNetwork(nn.Module):
             #h_std = torch.exp(self.bn_std(self.std_out(h_enc)))
             #h_std = self.softplus(self.std_out(h_enc))
 
-            # BN
-            h_mean = self.bn_mu(h_mean)
-            h_std = self.softplus(self.bn_std(h_std))
-            
-            h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
-            h_std = h_std.view(tgt_batch, tgt_len, src_len)
+            if self.normalization == "bn":
+                # BN
+                h_mean = self.bn_mu(h_mean)
+                h_std = self.softplus(self.bn_std(h_std))
+                
+                h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+                h_std = h_std.view(tgt_batch, tgt_len, src_len)
+            elif self.normalization == "ln":
+                # LN
+                h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+                h_std = h_std.view(tgt_batch, tgt_len, src_len)
 
-            """
-            h_mean_row_mean = torch.mean(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
-            h_mean_row_std = torch.std(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
-            
-            h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
-            h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+                h_mean_row_mean = torch.mean(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+                h_mean_row_std = torch.std(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+                
+                h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+                h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
 
-            h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
-            h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
-            h_std = self.softplus(h_std)
-            """
+                h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
+                h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
+                h_std = self.softplus(h_std)
             
             return [h_mean, h_std]
 
         elif self.attn_type == "mlpadd":
+            # unimplemented switching on norm
             H = self.rnn_size
             Ns, S, Hs = h_s.size()
             Nt, T, Ht = h_t.size()
@@ -158,6 +171,7 @@ class InferenceNetwork(nn.Module):
 
             return [h_mu, h_sigma]
         elif self.attn_type == "general":
+            # unimplemented switching on norm
             H = self.rnn_size
             Ns, S, Hs = h_s.size()
             Nt, T, Ht = h_t.size()

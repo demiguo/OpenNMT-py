@@ -26,3 +26,4 @@ def sequence_mask(lengths, max_len=None):
 def use_gpu(opt):
     return (hasattr(opt, 'gpuid') and len(opt.gpuid) > 0) or \
         (hasattr(opt, 'gpu') and opt.gpu > -1)
+

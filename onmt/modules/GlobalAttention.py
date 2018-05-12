@@ -58,12 +58,13 @@ class GlobalAttention(nn.Module):
        attn_type (str): type of attention to use, options [dot,general,mlp]
 
     """
-    def __init__(self, dim, coverage=False, attn_type="dot", dist_type="normal"):
+    def __init__(self, dim, coverage=False, attn_type="dot", dist_type="normal", normalization="none"):
         super(GlobalAttention, self).__init__()
 
         self.dim = dim
         self.attn_type = attn_type
         self.dist_type = dist_type
+        self.normalization = normalization
         assert (self.attn_type in ["dot", "general", "mlp", "mlpadd", "dotmlp"]), \
             ("Please select a valid attention type.")
 
@@ -90,9 +91,19 @@ class GlobalAttention(nn.Module):
                 self.mean_out = nn.Linear(500, 1)
                 self.std_out = nn.Linear(500, 1)
 
-        #if self.dist_type == "normal":
-            #self.bn_mu = nn.BatchNorm1d(1, affine=True)
-            #self.bn_std = nn.BatchNorm1d(1, affine=True)
+        if self.normalization == "bn":
+            if self.dist_type == "normal":
+                self.bn_mu = nn.BatchNorm1d(1, affine=True)
+                self.bn_std = nn.BatchNorm1d(1, affine=True)
+        elif self.normalization == "ln":
+            if self.dist_type == "normal":
+                self.mean_norm_alpha = nn.Parameter(torch.Tensor([1]))
+                self.std_norm_alpha = nn.Parameter(torch.Tensor([1]))
+                self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
+                self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
+        elif self.normalization == "bnshare":
+            pass
+
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
         self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
@@ -100,10 +111,6 @@ class GlobalAttention(nn.Module):
         self.sm = nn.Softmax(dim=1)
         self.tanh = nn.Tanh()
     
-        #self.mean_norm_alpha = nn.Parameter(torch.Tensor([1]))
-        #self.std_norm_alpha = nn.Parameter(torch.Tensor([1]))
-        #self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
-        #self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
 
         if coverage:
             self.linear_cover = nn.Linear(1, dim, bias=False)
@@ -175,21 +182,54 @@ class GlobalAttention(nn.Module):
             #h_std = self.softplus(self.bn_std(self.std_out(h_enc)))
             h_mean = self.mean_out(h_enc)
             h_std = self.std_out(h_enc)
-            
-            h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
-            h_std = h_std.view(tgt_batch, tgt_len, src_len)
 
-            """
-            h_mean_row_mean = torch.mean(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
-            h_mean_row_std = torch.std(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
-            
-            h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
-            h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+            if self.normalization == "bn":
+                h_mean = self.bn_mu(h_mean)
+                h_std = self.softplus(self.bn_std(h_std))
 
-            h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
-            h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
-            """
-            h_std = self.softplus(h_std)
+                h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+                h_std = h_std.view(tgt_batch, tgt_len, src_len)
+            elif self.normalization == "bnshare":
+                h_mean = F.batch_norm(
+                    h_mean,
+                    self.bn_mu.running_mean,
+                    self.bn_mu.running_var,
+                    weight=self.bn_mu.weight,
+                    bias=self.bn_mu.bias,
+                    training=False,
+                    momentum=self.bn_mu.momentum,
+                    eps=self.bn_mu.eps)
+
+                h_std = F.softplus(F.batch_norm(
+                    h_std,
+                    self.bn_std.running_mean,
+                    self.bn_std.running_var,
+                    weight=self.bn_std.weight,
+                    bias=self.bn_std.bias,
+                    training=False,
+                    momentum=self.bn_std.momentum,
+                    eps=self.bn_std.eps))
+
+                h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+                h_std = h_std.view(tgt_batch, tgt_len, src_len)
+            elif self.normalization == "ln":
+                h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+                h_std = h_std.view(tgt_batch, tgt_len, src_len)
+
+                h_mean_row_mean = torch.mean(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+                h_mean_row_std = torch.std(h_mean, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+
+                h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+                h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+
+                h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
+                h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
+                h_std = self.softplus(h_std)
+            elif self.normalization == "none": 
+                h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+                h_std = h_std.view(tgt_batch, tgt_len, src_len)
+                h_std = self.softplus(h_std)
+
             return [h_mean, h_std]
         elif self.attn_type == "mlpadd":
             H = self.dim

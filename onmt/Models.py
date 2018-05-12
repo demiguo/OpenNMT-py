@@ -340,7 +340,7 @@ class RNNDecoderBase(nn.Module):
                  hidden_size, attn_type="general",
                  coverage_attn=False, context_gate=None,
                  copy_attn=False, dropout=0.0, embeddings=None,
-                 reuse_copy_attn=False, dist_type="normal"):
+                 reuse_copy_attn=False, dist_type="normal", normalization="none"):
         super(RNNDecoderBase, self).__init__()
 
         # Basic attributes.
@@ -351,6 +351,7 @@ class RNNDecoderBase(nn.Module):
         self.embeddings = embeddings
         self.dropout = nn.Dropout(dropout)
         self.dist_type = dist_type
+        self.normalization = normalization
 
         # Build the RNN.
         self.rnn = self._build_rnn(rnn_type,
@@ -372,7 +373,8 @@ class RNNDecoderBase(nn.Module):
         self.attn = onmt.modules.GlobalAttention(
             hidden_size, coverage=coverage_attn,
             attn_type=attn_type,
-            dist_type = dist_type
+            dist_type=dist_type,
+            normalization=normalization,
         )
 
         # Set up a separated copy attention layer, if needed.

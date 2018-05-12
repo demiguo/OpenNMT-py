@@ -109,6 +109,7 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     rnn_type = opt.rnn_type
     rnn_size = opt.inference_network_rnn_size
     dropout = opt.inference_network_dropout
+    inference_network_normalization = opt.inference_network_normalization
 
     print ('    * inference network type: %s'%inference_network_type)
     print ('    * inference network RNN type: %s'%rnn_type)
@@ -116,12 +117,14 @@ def make_inference_network(opt, src_embeddings, tgt_embeddings,
     print ('    * inference network dropout: %s'%dropout)
     print ('    * inference network src layers: %s'%inference_network_src_layers)
     print ('    * inference network tgt layers: %s'%inference_network_tgt_layers)
+    print ('    * inference network normalization: %s'%inference_network_normalization)
     print ('    * TODO: RNN\'s could be possibly shared')
 
     return InferenceNetwork(inference_network_type,
                             src_embeddings, tgt_embeddings,
                             rnn_type, inference_network_src_layers,
                             inference_network_tgt_layers, rnn_size, dropout,
+                            normalization=inference_network_normalization,
                             attn_type=opt.global_attention,
                             dist_type=opt.dist_type,
                             norm_alpha=opt.norm_alpha,
@@ -167,7 +170,8 @@ def make_decoder(opt, embeddings):
                                        opt.dropout,
                                        embeddings,
                                        opt.reuse_copy_attn,
-                                       opt.dist_type)
+                                       dist_type=opt.dist_type,
+                                       normalization=opt.prior_normalization)
     else:
         return StdRNNDecoder(opt.rnn_type, opt.brnn,
                              opt.dec_layers, opt.rnn_size,
@@ -257,6 +261,10 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
         src_dict, src_feature_dicts,
         tgt_dict, tgt_feature_dicts
     ) if model_opt.inference_network_type != "none" else None
+
+    if model_opt.prior_normalization == "bnshare":
+        decoder.attn.bn_mu = inference_network.bn_mu
+        decoder.attn.bn_std = inference_network.bn_std
 
     # Make NMTModel(= encoder + decoder + inference network).
     model = (
