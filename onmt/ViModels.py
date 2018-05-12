@@ -91,6 +91,10 @@ class InferenceNetwork(nn.Module):
                 self.std_norm_alpha = nn.Parameter(torch.Tensor([1]))
                 self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
                 self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
+        elif self.normalization == "lnsigma":
+            if self.dist_type == "normal":
+                self.mean_norm_beta = nn.Parameter(torch.Tensor([0]))
+                self.std_norm_beta = nn.Parameter(torch.Tensor([0]))
 
     def get_normal_scores(self, h_s, h_t):
         """ h_s: [batch x src_length x rnn_size]
@@ -143,6 +147,21 @@ class InferenceNetwork(nn.Module):
                 h_mean = self.mean_norm_alpha * (h_mean - h_mean_row_mean) / h_mean_row_std + self.mean_norm_beta
                 h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
                 h_std = self.softplus(h_std)
+            elif self.normalization == "lnsigma":
+                # LN on sigma only
+                h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+                h_std = h_std.view(tgt_batch, tgt_len, src_len)
+
+                h_std_row_mean = torch.mean(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+                h_std_row_std = torch.std(h_std, dim=2, keepdim=True).expand(tgt_batch, tgt_len, src_len)
+
+                h_std = self.std_norm_alpha * (h_std - h_std_row_mean) / h_std_row_std + self.std_norm_beta
+                h_std = self.softplus(h_std)
+            elif self.normalization == "clampsigma":
+                h_mean = h_mean.view(tgt_batch, tgt_len, src_len)
+                h_std = h_std.view(tgt_batch, tgt_len, src_len)
+                h_std = self.softplus(h_std).clamp(max=1)
+
             
             return [h_mean, h_std]
 

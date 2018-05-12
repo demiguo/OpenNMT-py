@@ -108,7 +108,7 @@ def model_opts(parser):
                         If 'none', then uses a softmax over scores.
                         """)
     group.add_argument("-inference_network_normalization", type=str, default="bn",
-                        choices=["bn", "ln", "none"],
+                        choices=["bn", "ln", "none", "lnsigma", "clampsigma"],
                         help="""Q attn score normalization.
                         """)
     group.add_argument("-prior_normalization", type=str, default="none",
