@@ -352,7 +352,8 @@ class Trainer(object):
                     if param.grad is not None and (param.grad != param.grad).any()
                 ]
                 if nans:
-                    import pdb; pdb.set_trace()
+                    #import pdb; pdb.set_trace()
+                    print("NANS CANCELLED")
 
                 for name, param in self.model.named_parameters():
                     if param.grad is not None:
