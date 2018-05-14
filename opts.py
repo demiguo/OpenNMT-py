@@ -136,6 +136,7 @@ def model_opts(parser):
                        help='Number of layers in the inference network tgt RNN')
     group.add_argument('-inference_network_rnn_size', type=int, default=500,
                        help='Size of rnn hidden states in the inference network RNN')
+    group.add_argument('-use_prior', type=int, default=0, help='Use prior in model')
 
     # Attention options
     group = parser.add_argument_group('Model- Attention')

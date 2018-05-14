@@ -8,7 +8,7 @@ from torch.nn.utils.rnn import pack_padded_sequence as pack
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
 
 import onmt
-from onmt.Utils import aeq, sequence_mask
+from onmt.Utils import aeq, sequence_mask, sample_attn
 from onmt.Models import RNNEncoder, InputFeedRNNDecoder, NMTModel
 
 
@@ -162,7 +162,6 @@ class InferenceNetwork(nn.Module):
                 h_std = h_std.view(tgt_batch, tgt_len, src_len)
                 h_std = self.softplus(h_std).clamp(max=1)
 
-            
             return [h_mean, h_std]
 
         elif self.attn_type == "mlpadd":
@@ -227,13 +226,8 @@ class InferenceNetwork(nn.Module):
         tgt_memory_bank = tgt_memory_bank.transpose(0,1) # batch_size, tgt_length, rnn_size
 
         if self.dist_type == "dirichlet":
+            # probably broken
             scores = torch.bmm(tgt_memory_bank, src_memory_bank)
-            #print("max: {}, min: {}".format(scores.max(), scores.min()))
-            # affine
-            scores = scores - scores.min(-1)[0].unsqueeze(-1) + 1e-2
-            # exp
-            #scores = scores.clamp(-1, 1).exp()
-            #scores = scores.clamp(min=1e-2)
             scores = [scores]
         elif self.dist_type == "normal":
             # log normal
@@ -260,32 +254,6 @@ class InferenceNetwork(nn.Module):
 
 
 class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
-    """
-    Input feeding based decoder. See :obj:`RNNDecoderBase` for options.
-
-    Based around the input feeding approach from
-    "Effective Approaches to Attention-based Neural Machine Translation"
-    :cite:`Luong2015`
-
-
-    .. mermaid::
-
-       graph BT
-          A[Input n-1]
-          AB[Input n]
-          subgraph RNN
-            E[Pos n-1]
-            F[Pos n]
-            E --> F
-          end
-          G[Encoder]
-          H[Memory_Bank n-1]
-          A --> E
-          AB --> F
-          E --> H
-          G --> H
-    """
-
     def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None,
                           q_scores_sample=None, q_scores=None):
         """
@@ -334,8 +302,9 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
 
         # Input feed concatenates hidden state with
         # input at every time step.
-        q_scores_mean = q_scores[0].view(batch_size, tgt_len, -1).transpose(0,1)
-        q_scores_std = q_scores[1].view(batch_size, tgt_len, -1).transpose(0,1)
+        if q_scores is not None:
+            q_scores_mean = q_scores[0].view(batch_size, tgt_len, -1).transpose(0,1)
+            q_scores_std = q_scores[1].view(batch_size, tgt_len, -1).transpose(0,1)
         for i, emb_t in enumerate(emb.split(1)):
             emb_t = emb_t.squeeze(0)
             decoder_input = torch.cat([emb_t, input_feed], 1)
@@ -422,22 +391,16 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
 
 
 class ViNMTModel(nn.Module):
-    """
-    Core trainable object in OpenNMT. Implements a trainable interface
-    for a simple, generic encoder + decoder model.
-
-    Args:
-      encoder (:obj:`EncoderBase`): an encoder object
-      decoder (:obj:`RNNDecoderBase`): a decoder object
-      multi<gpu (bool): setup for multigpu support
-    """
-    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="normal"):
+    def __init__(self, encoder, decoder, inference_network, multigpu=False, dist_type="normal", use_prior=False):
         self.multigpu = multigpu
         super(ViNMTModel, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.inference_network = inference_network
         self.dist_type = dist_type
+        self.use_prior = use_prior
+        # use this during decoding
+        self.no_q = False
 
     def forward(self, src, tgt, lengths, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
@@ -463,33 +426,16 @@ class ViNMTModel(nn.Module):
         inftgt = tgt[1:]
         tgt = tgt[:-1]  # exclude last target from inputs
         tgt_length, batch_size, rnn_size = tgt.size()
+        src_length = src.size(0)
 
         enc_final, memory_bank = self.encoder(src, lengths)
         enc_state = self.decoder.init_decoder_state(
             src, memory_bank, enc_final)
-        if self.inference_network is not None:
+        if self.inference_network is not None and not self.no_q:
             # inference network q(z|x,y)
             q_scores = self.inference_network(src, inftgt, lengths, memory_bank) # batch_size, tgt_length, src_length
             #q_scores = self.inference_network(src, tgt, lengths, memory_bank) # batch_size, tgt_length, src_length
-            q_nparam = len(q_scores)
-            src_length = q_scores[0].size(2)
-            if self.dist_type != "none":
-                for i in range(q_nparam):
-                    # batch_size * tgt_length, src_length
-                    q_scores[i] = q_scores[i].view(-1, q_scores[i].size(2))
-                if self.dist_type == "dirichlet":
-                    m = torch.distributions.Dirichlet(q_scores[0].cpu())
-                elif self.dist_type == "normal":
-                    m = torch.distributions.normal.Normal(q_scores[0], q_scores[1])
-                else:
-                    raise Exception("Unsupported dist_type")
-                if self.dist_type == 'normal':
-                    q_scores_sample = F.softmax(m.rsample().cuda(), dim=-1).view(batch_size, tgt_length, -1).transpose(0,1)
-                    #q_scores_sample = F.dropout(q_scores_sample, p=0.1, training=self.training)
-                else:
-                    q_scores_sample = m.rsample().cuda().view(batch_size, tgt_length, -1).transpose(0,1)
-            else:
-                q_scores_sample = F.softmax(q_scores[0], dim=-1).transpose(0, 1)
+            q_scores_sample = sample_attn(scores=q_scores, dist_type=self.dist_type)
         else:
             q_scores, q_scores_sample = None, None
 
@@ -498,7 +444,8 @@ class ViNMTModel(nn.Module):
                          enc_state if dec_state is None
                          else dec_state,
                          memory_lengths=lengths,
-                         q_scores_sample=q_scores_sample, q_scores=q_scores)
+                         q_scores_sample=q_scores_sample if not self.use_prior else None,
+                         q_scores=q_scores if not self.use_prior else None)
 
         if self.multigpu:
             # Not yet supported on multi-gpu
@@ -506,7 +453,7 @@ class ViNMTModel(nn.Module):
             attns = None
 
         if self.inference_network is not None:
-            for i in range(q_nparam):
+            for i in range(len(q_scores)):
                 q_scores[i] = q_scores[i].view(batch_size, tgt_length, src_length)
             if self.dist_type == "dirichlet":
                 return decoder_outputs, attns, dec_state,\

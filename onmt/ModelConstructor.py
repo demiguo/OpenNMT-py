@@ -271,7 +271,7 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
         NMTModel(encoder, decoder, None, "none")
         if inference_network is None
         else ViNMTModel(
-            encoder, decoder, inference_network, dist_type=model_opt.dist_type)
+            encoder, decoder, inference_network, dist_type=model_opt.dist_type, use_prior=model_opt.use_prior > 0)
     )
     model.model_type = model_opt.model_type
 

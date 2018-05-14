@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from onmt.Utils import aeq, sequence_mask
+from onmt.Utils import aeq, sequence_mask, sample_attn
 import torch.nn.functional as F
 
 class GlobalAttention(nn.Module):
@@ -232,7 +232,9 @@ class GlobalAttention(nn.Module):
 
             return [h_mean, h_std]
         elif self.attn_type == "mlpadd":
+            align_vectors = sample_attn(raw_scores, self.dist_type)
             H = self.dim
+            align_vectors = q_scores_sample
             Ns, S, Hs = h_s.size()
             Nt, T, Ht = h_t.size()
             aeq(Ns, Nt)
@@ -272,7 +274,6 @@ class GlobalAttention(nn.Module):
 
     def forward(self, input, memory_bank, memory_lengths=None, coverage=None, q_scores_sample=None):
         """
-
         Args:
           input (`FloatTensor`): query vectors `[batch x tgt_len x dim]`
           memory_bank (`FloatTensor`): source vectors `[batch x src_len x dim]`
@@ -334,10 +335,12 @@ class GlobalAttention(nn.Module):
         # each context vector c_t is the weighted average
         # over all the source hidden states
         if q_scores_sample is None:
-            c = torch.bmm(align_vectors, memory_bank)
+            align_vectors = sample_attn(raw_scores, self.dist_type).transpose(0, 1)
         else:
-            c = torch.bmm(q_scores_sample, memory_bank)
+            align_vectors = q_scores_sample
         # what is size of q_scores_sample? batch, targetL, sourceL
+         
+        c = torch.bmm(align_vectors, memory_bank)
 
         # concatenate
         concat_c = torch.cat([c, input], 2).view(batch*targetL, dim*2)
@@ -373,5 +376,4 @@ class GlobalAttention(nn.Module):
             aeq(batch, batch_)
             aeq(sourceL, sourceL_)
             """
-        #return attn_h, align_vectors, raw_scores
-        return attn_h, q_scores_sample, raw_scores
+        return attn_h, align_vectors, raw_scores
