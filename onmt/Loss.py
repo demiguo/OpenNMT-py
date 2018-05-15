@@ -197,12 +197,15 @@ class NMTLossCompute(LossComputeBase):
                 p_a_scores = p_a_scores.transpose(0, 1)
             elif self.dist_type == "normal":
                 assert self.dist_type == "normal", "Dist Type not found in make shard state"
-                q_scores_0, q_scores_1, p_a_scores_0, p_a_scores_1 = dist_scores
+                #q_scores_0, q_scores_1, p_a_scores_0, p_a_scores_1 = dist_scores
+                q_scores_2, p_a_scores_2, _, _, _, _ = dist_scores
                 # TODO(demi): understand why we want to transpose
-                q_scores_0 = q_scores_0.transpose(0, 1)
-                p_a_scores_0 = p_a_scores_0.transpose(0, 1)
-                q_scores_1 = q_scores_1.transpose(0, 1)
-                p_a_scores_1 = p_a_scores_1.transpose(0, 1)
+                q_scores_2 = q_scores_2.transpose(0, 1)
+                p_a_scores_2 = p_a_scores_2.transpose(0, 1)
+                #q_scores_0 = q_scores_0.transpose(0, 1)
+                #p_a_scores_0 = p_a_scores_0.transpose(0, 1)
+                #q_scores_1 = q_scores_1.transpose(0, 1)
+                #p_a_scores_1 = p_a_scores_1.transpose(0, 1)
             elif self.dist_type == "none":
                 q_scores, p_a_scores = dist_scores
                 q_scores = q_scores.transpose(0, 1)
@@ -225,10 +228,12 @@ class NMTLossCompute(LossComputeBase):
             return {
                 "output": output,
                 "target": batch.tgt[range_[0] + 1: range_[1]],
-                "q_scores_0": q_scores_0,
-                "p_a_scores_0": p_a_scores_0,
-                "q_scores_1": q_scores_1,
-                "p_a_scores_1": p_a_scores_1
+                "q_scores_2": q_scores_2,
+                "p_a_scores_2": p_a_scores_2,
+                #"q_scores_0": q_scores_0,
+                #"p_a_scores_0": p_a_scores_0,
+                #"q_scores_1": q_scores_1,
+                #"p_a_scores_1": p_a_scores_1
             }
         elif self.dist_type == "none":
             return {
@@ -244,7 +249,7 @@ class NMTLossCompute(LossComputeBase):
 
 
     def _compute_loss(self, batch, output, target,
-                      q_scores_0=None, p_a_scores_0=None, q_scores_1=None, p_a_scores_1=None):
+            q_scores_2=None, p_a_scores_2=None):#, q_scores_1=None, p_a_scores_1=None):
         # TODO(demi): understand how sharding work and make sure "additional loss" works
         scores = self.generator(self._bottle(output))
 
@@ -261,10 +266,7 @@ class NMTLossCompute(LossComputeBase):
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
         
-        if q_scores_0 is None or p_a_scores_0 is None:
-            loss = xent
-            kl = xent.new([0])
-        elif self.dist_type == "dirichlet":
+        if self.dist_type == "dirichlet":
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
             p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
             q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
@@ -277,19 +279,25 @@ class NMTLossCompute(LossComputeBase):
             #loss += kl
             loss = xent # + kl
         elif self.dist_type == "normal":
-            q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
-            p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
-            q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
-            p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
+            q_scores_2 = q_scores_2.contiguous().view(-1, q_scores_2.size(2))
+            p_a_scores_2 = p_a_scores_2.contiguous().view(-1, p_a_scores_2.size(2))
+            q_scores_2 = q_scores_2[gtruth.ne(self.padding_idx)]
+            p_a_scores_2 = p_a_scores_2[gtruth.ne(self.padding_idx)]
+            #q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
+            #p_a_scores_0 = p_a_scores_0.contiguous().view(-1, p_a_scores_0.size(2))
+            #q_scores_0 = q_scores_0[gtruth.ne(self.padding_idx)]
+            #p_a_scores_0 = p_a_scores_0[gtruth.ne(self.padding_idx)]
 
-            q_scores_1 = q_scores_1.contiguous().view(-1, q_scores_1.size(2))
-            p_a_scores_1 = p_a_scores_1.contiguous().view(-1, p_a_scores_1.size(2))
+            #q_scores_1 = q_scores_1.contiguous().view(-1, q_scores_1.size(2))
+            #p_a_scores_1 = p_a_scores_1.contiguous().view(-1, p_a_scores_1.size(2))
             # 64, 15, 12
-            q_scores_1 = q_scores_1[gtruth.ne(self.padding_idx)]
-            p_a_scores_1 = p_a_scores_1[gtruth.ne(self.padding_idx)]
+            #q_scores_1 = q_scores_1[gtruth.ne(self.padding_idx)]
+            #p_a_scores_1 = p_a_scores_1[gtruth.ne(self.padding_idx)]
 
-            q_dist = torch.distributions.normal.Normal(q_scores_0, q_scores_1)
-            p_a_dist = torch.distributions.normal.Normal(p_a_scores_0, p_a_scores_1)
+            #q_dist = torch.distributions.normal.Normal(q_scores_0, q_scores_1)
+            #p_a_dist = torch.distributions.normal.Normal(p_a_scores_0, p_a_scores_1)
+            q_dist = torch.distributions.Dirichlet(q_scores_2)
+            p_a_dist = torch.distributions.Dirichlet(p_a_scores_2)
 
             kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
@@ -311,7 +319,7 @@ class NMTLossCompute(LossComputeBase):
         else:
             loss = xent + kl
 
-        #loss = xent + kl*0.5
+        #loss = xent + kl*0
         if self.confidence < 1:
             # Default: report smoothed ppl.
             # loss_data = -log_likelihood.sum(0)

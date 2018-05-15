@@ -50,7 +50,6 @@ fields = dict([(k, f) for (k, f) in fields.items()
     if k in train.examples[0].__dict__])
 train.fields = fields
 valid.fields = fields
-
 savepath = os.path.join(args.savepath, args.modelname)
 nllpath = savepath + ".nlls"
 attnpath = savepath + ".attns"
@@ -90,7 +89,7 @@ else:
 
         if True:
             if model_opt.dist_type == 'normal':
-                output, attn_dict, decoderstate, (q_scores, q_scores_std, p_a_scores, p_a_score_std) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
+                output, attn_dict, decoderstate, (_, _, q_scores, q_scores_std, p_a_scores, p_a_score_std) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
             else:
                 output, attn_dict, decoderstate, (q_scores, p_a_scores) = model(x[0].view(-1, 1, 1), y.view(-1, 1, 1), x[1])
             #attn = attn_dict["std"]

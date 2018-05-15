@@ -259,7 +259,7 @@ def train_opts(parser):
     group = parser.add_argument_group('Initialization')
     group.add_argument('-start_epoch', type=int, default=1,
                        help='The epoch from which to start')
-    group.add_argument('-param_init', type=float, default=0.05,
+    group.add_argument('-param_init', type=float, default=0.1,
                        help="""Parameters are initialized over uniform distribution
                        with support (-param_init, param_init).
                        Use 0 to not use initialization""")

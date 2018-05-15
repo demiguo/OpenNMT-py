@@ -386,7 +386,7 @@ class RNNDecoderBase(nn.Module):
         self._reuse_copy_attn = reuse_copy_attn
 
     def forward(self, tgt, memory_bank, state, memory_lengths=None,
-                q_scores_sample=None, q_scores=None):
+                q_scores_residual=None):
         """
         Args:
             tgt (`LongTensor`): sequences of padded tokens
@@ -413,15 +413,13 @@ class RNNDecoderBase(nn.Module):
         # END
 
         # Run the forward pass of the RNN.
-        decoder_final, decoder_outputs, attns, p_a_scores = self._run_forward_pass(
+        decoder_final, decoder_outputs, attns, p_a_scores, q_scores = self._run_forward_pass(
             tgt, memory_bank, state, memory_lengths=memory_lengths,
-            q_scores_sample=q_scores_sample, q_scores=q_scores)
+            q_scores_residual=q_scores_residual)
 
         # Update the state with the result.
         final_output = decoder_outputs[-1]
         coverage = None
-        if "coverage" in attns:
-            coverage = attns["coverage"][-1].unsqueeze(0)
         state.update_state(decoder_final, final_output.unsqueeze(0), coverage)
 
         # Concatenates sequence of tensors along a new dimension.
@@ -430,7 +428,7 @@ class RNNDecoderBase(nn.Module):
         for k in attns:
             attns[k] = torch.stack(attns[k])
 
-        return decoder_outputs, state, attns, p_a_scores
+        return decoder_outputs, state, attns, p_a_scores, q_scores
 
     def init_decoder_state(self, src, memory_bank, encoder_final):
         def _fix_enc_hidden(h):

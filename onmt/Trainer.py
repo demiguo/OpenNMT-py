@@ -182,6 +182,8 @@ class Trainer(object):
             # Dynamic batching
             num_batches = -1
 
+        global b
+        b = None
         for i, batch in enumerate(train_iter):
             cur_dataset = train_iter.get_cur_dataset()
             self.train_loss.cur_dataset = cur_dataset
@@ -196,8 +198,12 @@ class Trainer(object):
                 normalization += batch.batch_size
 
             if accum == self.grad_accum_count:
+                global b
+                if b is None:
+                    b = true_batchs
+                b = true_batchs
                 self._gradient_accumulation(
-                        true_batchs, total_stats,
+                        b, total_stats,
                         report_stats, normalization)
 
                 if report_func is not None:
