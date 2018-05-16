@@ -39,7 +39,7 @@ class LossComputeBase(nn.Module):
         self.tgt_vocab = tgt_vocab
         self.padding_idx = tgt_vocab.stoi[onmt.io.PAD_WORD]
 
-    def _make_shard_state(self, batch, output, range_, attns=None, dist_scores=None):
+    def _make_shard_state(self, batch, output, range_, attns=None, dist_scores=None, sample_outputs=None):
         """
         Make shard state dictionary for shards() to return iterable
         shards for efficient loss computation. Subclass must define
@@ -66,7 +66,7 @@ class LossComputeBase(nn.Module):
         """
         return NotImplementedError
 
-    def monolithic_compute_loss(self, batch, output, attns, dist_scores=None):
+    def monolithic_compute_loss(self, batch, output, attns, dist_scores=None, sample_outputs=None):
         """
         Compute the forward loss for the batch.
 
@@ -81,14 +81,14 @@ class LossComputeBase(nn.Module):
             :obj:`onmt.Statistics`: loss statistics
         """
         range_ = (0, batch.tgt.size(0))
-        shard_state = self._make_shard_state(batch, output, range_, attns, dist_scores=dist_scores)
+        shard_state = self._make_shard_state(batch, output, range_, attns, dist_scores=dist_scores, sample_outputs=sample_outputs)
         _, batch_stats = self._compute_loss(batch, **shard_state)
 
         return batch_stats
 
     def sharded_compute_loss(self, batch, output, attns,
                              cur_trunc, trunc_size, shard_size,
-                             normalization, dist_scores=None):
+                             normalization, dist_scores=None, sample_outputs=None):
         """Compute the forward loss and backpropagate.  Computation is done
         with shards and optionally truncation for memory efficiency.
 
@@ -118,7 +118,7 @@ class LossComputeBase(nn.Module):
         """
         batch_stats = onmt.Statistics()
         range_ = (cur_trunc, cur_trunc + trunc_size)
-        shard_state = self._make_shard_state(batch, output, range_, attns, dist_scores=dist_scores)
+        shard_state = self._make_shard_state(batch, output, range_, attns, dist_scores=dist_scores, sample_outputs=sample_outputs)
         #print("sharded compute loss")
         #import pdb; pdb.set_trace()
         for shard in shards(shard_state, shard_size):
@@ -128,7 +128,7 @@ class LossComputeBase(nn.Module):
 
         return batch_stats
 
-    def _stats(self, loss, xent, kl, scores, target):
+    def _stats(self, loss, xent, kl, scores, target, sample_xents=None):
         """
         Args:
             loss (:obj:`FloatTensor`): the loss computed by the loss criterion.
@@ -148,7 +148,8 @@ class LossComputeBase(nn.Module):
             xent.cpu().numpy(),
             kl.cpu().numpy(),
             non_padding.long().sum().cpu().numpy(),
-            num_correct.cpu().numpy())
+            num_correct.cpu().numpy(),
+            sample_xents.cpu().numpy())
 
     def _bottle(self, v):
         return v.view(-1, v.size(2))
@@ -188,7 +189,7 @@ class NMTLossCompute(LossComputeBase):
             self.criterion = nn.NLLLoss(weight, size_average=False)
         self.confidence = 1.0 - label_smoothing
 
-    def _make_shard_state(self, batch, output, range_, attns=None, dist_scores=None):
+    def _make_shard_state(self, batch, output, range_, attns=None, dist_scores=None, sample_outputs=None):
         if dist_scores is not None:
             # NB(demi): not exactly sure how sharding works yet, so let's separate q_scores and p_a_scores here for now
             if self.dist_type == "dirichlet":
@@ -219,7 +220,8 @@ class NMTLossCompute(LossComputeBase):
                 "q_scores_0": q_scores,
                 "p_a_scores_0": p_a_scores,
                 "q_scores_1": None,
-                "p_a_scores_1": None
+                "p_a_scores_1": None,
+                "sample_outputs": sample_outputs
             }
         elif self.dist_type == "normal":
             return {
@@ -228,7 +230,8 @@ class NMTLossCompute(LossComputeBase):
                 "q_scores_0": q_scores_0,
                 "p_a_scores_0": p_a_scores_0,
                 "q_scores_1": q_scores_1,
-                "p_a_scores_1": p_a_scores_1
+                "p_a_scores_1": p_a_scores_1,
+                "sample_outputs": sample_outputs
             }
         elif self.dist_type == "none":
             return {
@@ -237,16 +240,25 @@ class NMTLossCompute(LossComputeBase):
                 "q_scores_0": q_scores,
                 "p_a_scores_0": p_a_scores,
                 "q_scores_1": None,
-                "p_a_scores_1": None
+                "p_a_scores_1": None,
+                "sample_outputs": sample_outputs
             }
         else:
             raise Exception("Unsupported dist_type")
 
 
     def _compute_loss(self, batch, output, target,
-                      q_scores_0=None, p_a_scores_0=None, q_scores_1=None, p_a_scores_1=None):
+                      q_scores_0=None, p_a_scores_0=None, q_scores_1=None, p_a_scores_1=None,
+                      sample_outputs=None):
         # TODO(demi): understand how sharding work and make sure "additional loss" works
         scores = self.generator(self._bottle(output))
+
+        # DEBUG: 
+        assert sample_outputs.size(0) == 5
+        sample_len = sample_outputs.size(0)
+        sample_scores = []
+        for i in range(sample_len):
+            sample_scores.append(self.generator(self._bottle(sample_outputs[i])))
 
         gtruth = target.view(-1)
         if self.confidence < 1:
@@ -261,6 +273,17 @@ class NMTLossCompute(LossComputeBase):
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
         
+        sample_xents = []
+        for i in range(sample_len):
+            sample_xents.append(self.criterion(sample_scores[i], gtruth))
+        sample_xents = torch.cat(sample_xents, dim=0)
+        sample_xents_agg = torch.mean(sample_xents)
+        # embed()
+        print("sample xents size=", sample_xents.size())
+        print("sample xents=", sample_xents)
+        print("sample xents agg size=", sample_xents_agg.size())
+        print("sample xents agg=", sample_xents_agg)
+
         if q_scores_0 is None or p_a_scores_0 is None:
             loss = xent
             kl = xent.new([0])
@@ -318,7 +341,8 @@ class NMTLossCompute(LossComputeBase):
         else:
             loss_data = loss.data.clone()
 
-        stats = self._stats(loss_data, xent.data.clone(), kl.data.clone(), scores.data, target.view(-1).data)
+        sample_xents_data = sample_xents_agg.data.clone()
+        stats = self._stats(loss_data, xent.data.clone(), kl.data.clone(), scores.data, target.view(-1).data, sample_xents_data)
 
         return loss, stats
 

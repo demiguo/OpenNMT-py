@@ -32,7 +32,7 @@ class Statistics(object):
     * perplexity
     * elapsed time
     """
-    def __init__(self, loss=0, xent=0, kl=0, n_words=0, n_correct=0):
+    def __init__(self, loss=0, xent=0, kl=0, n_words=0, n_correct=0, sample_xents=0):
         self.loss = loss
         self._xent = xent
         self._kl = kl
@@ -40,6 +40,7 @@ class Statistics(object):
         self.n_correct = n_correct
         self.n_src_words = 0
         self.start_time = time.time()
+        self.sample_xents = 0
 
     def update(self, stat):
         self.loss += stat.loss
@@ -47,6 +48,7 @@ class Statistics(object):
         self._kl += stat._kl
         self.n_words += stat.n_words
         self.n_correct += stat.n_correct
+        self.sample_xents += stat.sample_xents
 
     def accuracy(self):
         return 100 * (self.n_correct / self.n_words)
@@ -63,6 +65,9 @@ class Statistics(object):
     def pppl(self):
         return math.exp(self.xent())
 
+    def approximate_ppl(self):
+        return self._sample_xent
+
     def elapsed_time(self):
         return time.time() - self.start_time
 
@@ -77,7 +82,7 @@ class Statistics(object):
         """
         t = self.elapsed_time()
         print(("Epoch %2d, %5d/%5d; acc: %6.2f; ppl: %6.2f; xent: %6.2f; " +
-                "pppl: %6.2f; kl: %6.2f; " +
+                "pppl: %6.2f; kl: %6.2f; approx ppl:%6.2f" +
                "%3.0f src tok/s; %3.0f tgt tok/s; %6.0f s elapsed") %
               (epoch, batch, n_batches,
                self.accuracy(),
@@ -85,6 +90,7 @@ class Statistics(object):
                self.xent(),
                self.pppl(),
                self.kl(),
+               self.approximate_ppl(),
                self.n_src_words / (t + 1e-5),
                self.n_words / (t + 1e-5),
                time.time() - start))
@@ -252,11 +258,11 @@ class Trainer(object):
             tgt = onmt.io.make_features(batch, 'tgt')
 
             # F-prop through the model.
-            outputs, attns, _, dist_scores = self.model(src, tgt, src_lengths)
+            outputs, attns, _, dist_scores, sample_outputs = self.model(src, tgt, src_lengths)
 
             # Compute loss.
             batch_stats = self.valid_loss.monolithic_compute_loss(
-                    batch, outputs, attns, dist_scores=dist_scores)
+                    batch, outputs, attns, dist_scores=dist_scores, sample_outputs=sample_outputs)
 
             # Update statistics.
             stats.update(batch_stats)
@@ -337,14 +343,14 @@ class Trainer(object):
                 # 2. F-prop all but generator.
                 if self.grad_accum_count == 1:
                     self.model.zero_grad()
-                outputs, attns, dec_state, dist_scores = \
+                outputs, attns, dec_state, dist_scores, sample_outputs = \
                     self.model(src, tgt, src_lengths, dec_state)
 
                 # 3. Compute loss in shards for memory efficiency.
                 self.train_loss.alpha = self.alphas[self.progress_step]
                 batch_stats = self.train_loss.sharded_compute_loss(
                         batch, outputs, attns, j,
-                        trunc_size, self.shard_size, normalization, dist_scores=dist_scores)
+                        trunc_size, self.shard_size, normalization, dist_scores=dist_scores, sample_outputs=sample_outputs)
 
                 nans = [
                     (name, param)

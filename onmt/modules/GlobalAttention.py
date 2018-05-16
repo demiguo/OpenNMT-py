@@ -315,12 +315,12 @@ class GlobalAttention(nn.Module):
             memory_bank = self.tanh(memory_bank)
 
         # compute attention scores, as in Luong et al.
-        #align = self.score(input, memory_bank)
+        align = self.score(input, memory_bank)
 
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)
             mask = mask.unsqueeze(1)  # Make it broadcastable.
-            #align.data.masked_fill_(1 - mask, -float('inf'))
+            align.data.masked_fill_(1 - mask, -float('inf'))
 
         # Softmax to normalize attention weights
         if self.dist_type == "dirichlet":
@@ -338,6 +338,7 @@ class GlobalAttention(nn.Module):
             align_vectors = sample_attn(raw_scores, self.dist_type).transpose(0, 1)
         else:
             align_vectors = q_scores_sample
+        # align vectors are only attention scores
         # what is size of q_scores_sample? batch, targetL, sourceL
          
         c = torch.bmm(align_vectors, memory_bank)
