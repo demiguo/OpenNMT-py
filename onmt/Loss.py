@@ -128,7 +128,7 @@ class LossComputeBase(nn.Module):
 
         return batch_stats
 
-    def _stats(self, loss, xent, kl, scores, target, sample_xents=None):
+    def _stats(self, loss, xent, kl, scores, target, sample_xents):
         """
         Args:
             loss (:obj:`FloatTensor`): the loss computed by the loss criterion.
@@ -273,12 +273,11 @@ class NMTLossCompute(LossComputeBase):
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
-        
         sample_xents = []
         for i in range(sample_len):
             sample_xents.append(self.criterion(sample_scores[i], gtruth).unsqueeze(0))
         sample_xents = torch.cat(sample_xents, dim=0)
-        sample_xents_agg = torch.mean(sample_xents)
+        sample_xents_agg = torch.sum(sample_xents)
         # embed()
 
         if q_scores_0 is None or p_a_scores_0 is None:

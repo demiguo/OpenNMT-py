@@ -40,7 +40,8 @@ class Statistics(object):
         self.n_correct = n_correct
         self.n_src_words = 0
         self.start_time = time.time()
-        self.sample_xents = 0
+        self.sample_xents = sample_xents
+
 
     def update(self, stat):
         self.loss += stat.loss
@@ -66,7 +67,7 @@ class Statistics(object):
         return math.exp(self.xent())
 
     def approximate_ppl(self):
-        return self.sample_xents
+        return math.exp(min(self.sample_xents / self.n_words / 5., 100))
 
     def elapsed_time(self):
         return time.time() - self.start_time
