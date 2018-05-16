@@ -315,12 +315,12 @@ class GlobalAttention(nn.Module):
             memory_bank = self.tanh(memory_bank)
 
         # compute attention scores, as in Luong et al.
-        align = self.score(input, memory_bank)
+        # align = self.score(input, memory_bank)
 
         if memory_lengths is not None:
             mask = sequence_mask(memory_lengths)
             mask = mask.unsqueeze(1)  # Make it broadcastable.
-            align.data.masked_fill_(1 - mask, -float('inf'))
+            #align.data.masked_fill_(1 - mask, -float('inf'))
 
         # Softmax to normalize attention weights
         if self.dist_type == "dirichlet":

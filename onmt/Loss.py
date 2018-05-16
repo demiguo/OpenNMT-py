@@ -254,11 +254,12 @@ class NMTLossCompute(LossComputeBase):
         scores = self.generator(self._bottle(output))
 
         # DEBUG: 
-        assert sample_outputs.size(0) == 5
-        sample_len = sample_outputs.size(0)
+        assert sample_outputs.size(3) == 5
+        
+        sample_len = sample_outputs.size(3)
         sample_scores = []
         for i in range(sample_len):
-            sample_scores.append(self.generator(self._bottle(sample_outputs[i])))
+            sample_scores.append(self.generator(self._bottle(sample_outputs[:,:,:,i])))
 
         gtruth = target.view(-1)
         if self.confidence < 1:
@@ -275,14 +276,10 @@ class NMTLossCompute(LossComputeBase):
         
         sample_xents = []
         for i in range(sample_len):
-            sample_xents.append(self.criterion(sample_scores[i], gtruth))
+            sample_xents.append(self.criterion(sample_scores[i], gtruth).unsqueeze(0))
         sample_xents = torch.cat(sample_xents, dim=0)
         sample_xents_agg = torch.mean(sample_xents)
         # embed()
-        print("sample xents size=", sample_xents.size())
-        print("sample xents=", sample_xents)
-        print("sample xents agg size=", sample_xents_agg.size())
-        print("sample xents agg=", sample_xents_agg)
 
         if q_scores_0 is None or p_a_scores_0 is None:
             loss = xent

@@ -66,7 +66,7 @@ class Statistics(object):
         return math.exp(self.xent())
 
     def approximate_ppl(self):
-        return self._sample_xent
+        return self.sample_xents
 
     def elapsed_time(self):
         return time.time() - self.start_time
