@@ -402,6 +402,11 @@ class ViNMTModel(nn.Module):
         # use this during decoding
         self.no_q = False
 
+        self.approximate_ppl = True
+        self.approximate_ppl_nsample = 5
+        
+        # TODO(demi): add "approximate ppl & approximate ppl nsample"
+
     def forward(self, src, tgt, lengths, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
         Possible initialized with a beginning decoder state.
@@ -447,6 +452,22 @@ class ViNMTModel(nn.Module):
                          q_scores_sample=q_scores_sample if not self.use_prior else None,
                          q_scores=q_scores if not self.use_prior else None)
 
+        if self.approximate_ppl:
+            sample_decoder_outputs = []
+            for i in range(self.approximate_ppl_nsample):
+                sample_decoder_output, _, _, _ = \
+                self.decoder(tgt, memory_bank,
+                            enc_state if dec_state is None
+                            else dec_state,
+                            memory_lengths=lengths,
+                            q_scores_sample=None,
+                            q_scores=q_scores if not self.use_prior else None)
+                sample_decoder_outputs.append(sample_decoder_output)
+            sample_decoder_outputs = torch.cat(sample_decoder_outputs, dim=0)
+            # embed()?
+        else:
+            sample_decoder_outputs = None
+
         if self.multigpu:
             # Not yet supported on multi-gpu
             dec_state = None
@@ -457,16 +478,16 @@ class ViNMTModel(nn.Module):
                 q_scores[i] = q_scores[i].view(batch_size, tgt_length, src_length)
             if self.dist_type == "dirichlet":
                 return decoder_outputs, attns, dec_state,\
-                   (q_scores[0], p_a_scores[0])
+                   (q_scores[0], p_a_scores[0]), sample_decoder_outputs
             elif self.dist_type == "normal":
                 return decoder_outputs, attns, dec_state,\
-                   (q_scores[0], q_scores[1], p_a_scores[0], p_a_scores[1])
+                   (q_scores[0], q_scores[1], p_a_scores[0], p_a_scores[1]), sample_decoder_outputs
             elif self.dist_type == "none":
                 # sigh, lol. this whole thing needs to be cleaned up
                 return decoder_outputs, attns, dec_state, (
-                    q_scores_sample.transpose(0,1), p_a_scores[0])
+                    q_scores_sample.transpose(0,1), p_a_scores[0]), sample_decoder_outputs
             else:
                 raise Exception("Unsupported dist_type")
         else:
-            return decoder_outputs, attns, dec_state, None
+            return decoder_outputs, attns, dec_state, None, sample_decoder_outputs
         # p_a_scores: feed in sampled a, output unormalized attention scores (batch_size, tgt_length, src_length)
