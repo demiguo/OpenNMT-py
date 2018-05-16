@@ -461,9 +461,9 @@ class ViNMTModel(nn.Module):
                             else dec_state,
                             memory_lengths=lengths,
                             q_scores_sample=None,
-                            q_scores=q_scores if not self.use_prior else None)
-                sample_decoder_outputs.append(sample_decoder_output)
-            sample_decoder_outputs = torch.cat(sample_decoder_outputs, dim=0)
+                            q_scores=None)
+                sample_decoder_outputs.append(sample_decoder_output.unsqueeze(3))
+            sample_decoder_outputs = torch.cat(sample_decoder_outputs, dim=3)
             # embed()?
         else:
             sample_decoder_outputs = None
