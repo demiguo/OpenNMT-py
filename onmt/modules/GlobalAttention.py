@@ -233,7 +233,8 @@ class GlobalAttention(nn.Module):
         if input.dim() == 2:
             one_step = True
             input = input.unsqueeze(1)
-            q_scores_residual = q_scores_residual.unsqueeze(1)
+            if q_scores_residual is not None:
+                q_scores_residual = q_scores_residual.unsqueeze(1)
         else:
             assert (False)
 
@@ -280,52 +281,54 @@ class GlobalAttention(nn.Module):
         p_scores_alpha = raw_scores[2]
 
         memory_lengths_orig = memory_lengths
-        q_scores_log = q_scores_residual# + raw_scores[3]
-        #q_scores_log = raw_scores[3]
-        #q_scores_log = q_scores_residual
-        #q_scores_log = 5.0*self.tanh(q_scores_log)
-        q_scores_log = q_scores_log.clamp(-10, 10)
-        q_scores_log = q_scores_log.view(-1, src_len) #batch_size*tgt_len, src_len
-        mask = sequence_mask(memory_lengths).view(-1,1,src_len).expand(-1,tgt_len,src_len).contiguous().view(-1,src_len) #batch_size, src_len
-        memory_lengths_tgt = memory_lengths.view(-1, 1).float().expand(-1, tgt_len).contiguous().view(-1, 1)
-        memory_lengths = memory_lengths.view(-1, 1, 1).float().expand(-1, tgt_len, src_len).contiguous().view(-1, src_len)
-        q_scores_log.data.masked_fill_(1-mask, 0)
-        q_scores_log_mean = q_scores_log.sum(dim=-1, keepdim=True) / memory_lengths_tgt
-        q_scores_mean = q_scores_log - q_scores_log_mean
-        k1 = 1 - 2. / memory_lengths
-        k2 = 1. / (memory_lengths * memory_lengths)
-        q_scores_alpha = q_scores_log.exp()
-        q_scores_alpha_inv = 1. / q_scores_alpha
-        q_scores_alpha_inv.data.masked_fill_(1-mask, 0)
-        q_scores_std = k1 * q_scores_alpha_inv + k2 * torch.sum(q_scores_alpha_inv, dim=-1, keepdim=True)
-        q_scores_mean = q_scores_mean.view(tgt_batch, tgt_len, src_len)
-        q_scores_std = q_scores_std.view(tgt_batch, tgt_len, src_len)
-        q_scores_alpha = q_scores_alpha.view(tgt_batch, tgt_len, src_len)
-        mask = sequence_mask(memory_lengths_orig)
-        mask = mask.unsqueeze(1)  # Make it broadcastable.
-        q_scores_mean.data.masked_fill_(1 - mask, -999)
-        q_scores_std.data.masked_fill_(1 - mask, 0.001)
-        q_scores_alpha.data.masked_fill_(1 - mask, math.exp(-10))
+        if q_scores_residual is not None:
+            q_scores_log = q_scores_residual# + raw_scores[3]
+            #q_scores_log = raw_scores[3]
+            #q_scores_log = q_scores_residual
+            #q_scores_log = 5.0*self.tanh(q_scores_log)
+            q_scores_log = q_scores_log.clamp(-10, 10)
+            q_scores_log = q_scores_log.view(-1, src_len) #batch_size*tgt_len, src_len
+            mask = sequence_mask(memory_lengths).view(-1,1,src_len).expand(-1,tgt_len,src_len).contiguous().view(-1,src_len) #batch_size, src_len
+            memory_lengths_tgt = memory_lengths.view(-1, 1).float().expand(-1, tgt_len).contiguous().view(-1, 1)
+            memory_lengths = memory_lengths.view(-1, 1, 1).float().expand(-1, tgt_len, src_len).contiguous().view(-1, src_len)
+            q_scores_log.data.masked_fill_(1-mask, 0)
+            q_scores_log_mean = q_scores_log.sum(dim=-1, keepdim=True) / memory_lengths_tgt
+            q_scores_mean = q_scores_log - q_scores_log_mean
+            k1 = 1 - 2. / memory_lengths
+            k2 = 1. / (memory_lengths * memory_lengths)
+            q_scores_alpha = q_scores_log.exp()
+            q_scores_alpha_inv = 1. / q_scores_alpha
+            q_scores_alpha_inv.data.masked_fill_(1-mask, 0)
+            q_scores_std = k1 * q_scores_alpha_inv + k2 * torch.sum(q_scores_alpha_inv, dim=-1, keepdim=True)
+            q_scores_mean = q_scores_mean.view(tgt_batch, tgt_len, src_len)
+            q_scores_std = q_scores_std.view(tgt_batch, tgt_len, src_len)
+            q_scores_alpha = q_scores_alpha.view(tgt_batch, tgt_len, src_len)
+            mask = sequence_mask(memory_lengths_orig)
+            mask = mask.unsqueeze(1)  # Make it broadcastable.
+            q_scores_mean.data.masked_fill_(1 - mask, -999)
+            q_scores_std.data.masked_fill_(1 - mask, 0.001)
+            q_scores_alpha.data.masked_fill_(1 - mask, math.exp(-10))
         #m = torch.distributions.normal.Normal(raw_scores[0].view(-1, sourceL), raw_scores[1].view(-1, sourceL))
         #p_a_scores_sample = F.softmax(m.rsample().cuda(), dim=-1).view(batch, targetL, sourceL)
         #p_a_scores_sample = raw_scores[0].view(batch, targetL, sourceL)
+        
+        # ALWAYS USE P FOR CONTEXT
+        p_scores_mean_2 = p_scores_alpha / p_scores_alpha.sum(dim=2, keepdim=True)
+        c_input_feed = torch.bmm(p_scores_mean_2, memory_bank)
+        q_scores_mean_2 = q_scores_alpha / q_scores_alpha.sum(dim=2, keepdim=True)
         if not self.use_prior:
             m = torch.distributions.Dirichlet(q_scores_alpha.view(-1, sourceL).cpu())
             #m = torch.distributions.normal.Normal(q_scores_mean.view(-1, sourceL), q_scores_std.view(-1, sourceL))
             #q_scores_sample = F.softmax(m.rsample().cuda(), dim=-1).view(batch, targetL, sourceL)
             q_scores_sample = m.rsample().cuda().view(batch, targetL, sourceL)
-            q_scores_mean_2 = q_scores_alpha / q_scores_alpha.sum(dim=2, keepdim=True)
             #c = torch.bmm(p_a_scores_sample, memory_bank)
             c = torch.bmm(q_scores_sample, memory_bank)
-            c_input_feed = torch.bmm(q_scores_mean_2, memory_bank)
             # what is size of q_scores_sample? batch, targetL, sourceL
         else:
             # use prior
             m_p = torch.distributions.Dirichlet(p_scores_alpha.view(-1, sourceL).cpu())
             p_scores_sample = m_p.rsample().cuda().view(batch, targetL, sourceL)
-            p_scores_mean_2 = p_scores_alpha / p_scores_alpha.sum(dim=2, keepdim=True)
             c = torch.bmm(p_scores_sample, memory_bank)
-            c_input_feed = torch.bmm(p_scores_mean_2, memory_bank)
             q_scores_sample = p_scores_sample # to satisfy attns dict
 
         # concatenate
@@ -364,4 +367,7 @@ class GlobalAttention(nn.Module):
             aeq(batch, batch_)
             aeq(sourceL, sourceL_)
 
-        return attn_h, align_vectors, raw_scores, (q_scores_mean, q_scores_std, q_scores_alpha, q_scores_sample), attn_h_input_feed
+        if q_scores_residual is not None:
+            return attn_h, align_vectors, raw_scores, (q_scores_mean, q_scores_std, q_scores_alpha, q_scores_sample, q_scores_mean_2, p_scores_mean_2), attn_h_input_feed
+        else:
+            return attn_h, align_vectors, raw_scores, (p_scores_sample, p_scores_sample, p_scores_sample, p_scores_sample), attn_h_input_feed

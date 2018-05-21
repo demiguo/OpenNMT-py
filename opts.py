@@ -320,6 +320,8 @@ def train_opts(parser):
                         uses more memory.""")
     group.add_argument('-epochs', type=int, default=13,
                        help='Number of training epochs')
+    group.add_argument('-entropy', type=float, default=0,
+                       help='Number of training epochs')
     group.add_argument('-optim', default='sgd',
                        choices=['sgd', 'adagrad', 'adadelta', 'adam',
                                 'sparseadam'],

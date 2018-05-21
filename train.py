@@ -227,8 +227,10 @@ def make_loss_compute(model, tgt_vocab, opt, train=True):
 
 def train_model(model, fields, optim, data_type, model_opt):
     train_loss = make_loss_compute(model, fields["tgt"].vocab, opt)
+    train_loss.entropy = opt.entropy
     valid_loss = make_loss_compute(model, fields["tgt"].vocab, opt,
                                    train=False)
+    valid_loss.entropy = opt.entropy
 
     trunc_size = opt.truncated_decoder  # Badly named...
     shard_size = opt.max_generator_batches
@@ -257,6 +259,7 @@ def train_model(model, fields, optim, data_type, model_opt):
         print('Validation pppl: %g' % valid_stats.pppl())
         print('Validation xent: %g' % valid_stats.xent())
         print('Validation kl: %g' % valid_stats.kl())
+        print('Validation ent: %g' % valid_stats.ent())
         print('Validation accuracy: %g' % valid_stats.accuracy())
         return 0
 
@@ -271,6 +274,7 @@ def train_model(model, fields, optim, data_type, model_opt):
         print('Train pppl: %g' % train_stats.pppl())
         print('Train xent: %g' % train_stats.xent())
         print('Train kl: %g' % train_stats.kl())
+        print('Train ent: %g' % train_stats.ent())
         print('Train accuracy: %g' % train_stats.accuracy())
 
         # 2. Validate on the validation set.
@@ -282,6 +286,7 @@ def train_model(model, fields, optim, data_type, model_opt):
         print('Validation pppl: %g' % valid_stats.pppl())
         print('Validation xent: %g' % valid_stats.xent())
         print('Validation kl: %g' % valid_stats.kl())
+        print('Validation ent: %g' % valid_stats.ent())
         print('Validation accuracy: %g' % valid_stats.accuracy())
 
         # 3. Log to remote server.

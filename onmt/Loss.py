@@ -5,6 +5,9 @@ This includes: LossComputeBase and the standard NMTLossCompute, and
                sharded loss compute stuff.
 """
 from __future__ import division
+
+import math
+
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -13,6 +16,7 @@ import torch.nn.functional as F
 import onmt
 import onmt.io
 
+from onmt.Utils import logsumexp
 
 class LossComputeBase(nn.Module):
     """
@@ -128,7 +132,7 @@ class LossComputeBase(nn.Module):
 
         return batch_stats
 
-    def _stats(self, loss, xent, kl_0, kl, scores, target):
+    def _stats(self, loss, xent, kl_0, kl, ent, scores, target):
         """
         Args:
             loss (:obj:`FloatTensor`): the loss computed by the loss criterion.
@@ -148,6 +152,7 @@ class LossComputeBase(nn.Module):
             xent.cpu().numpy(),
             kl_0.cpu().numpy(),
             kl.cpu().numpy(),
+            ent.cpu().numpy(),
             non_padding.long().sum().cpu().numpy(),
             num_correct.cpu().numpy())
 
@@ -252,7 +257,13 @@ class NMTLossCompute(LossComputeBase):
     def _compute_loss(self, batch, output, target,
             q_scores_2=None, p_a_scores_2=None, q_scores_0=None, p_a_scores_0=None, q_scores_1=None, p_a_scores_1=None):
         # TODO(demi): understand how sharding work and make sure "additional loss" works
-        scores = self.generator(self._bottle(output))
+        #scores = self.generator(self._bottle(output))
+        scores = self.generator(output)
+        if scores.dim() == 4:
+            tscores = scores
+            scores = logsumexp(scores, dim=0) - math.log(scores.size(0))
+        # Expects T * N x V
+        scores = scores.view(-1, scores.size(-1))
 
         gtruth = target.view(-1)
         if self.confidence < 1:
@@ -266,6 +277,11 @@ class NMTLossCompute(LossComputeBase):
                 tmp_.index_fill_(0, mask, 0)
             gtruth = Variable(tmp_, requires_grad=False)
         xent = self.criterion(scores, gtruth)
+        """
+        if output.dim() == 4:
+            for i in range(tscores.size(0)):
+                assert(xent < self.criterion(tscores[i].view(-1, scores.size(-1)), gtruth))
+        """
         
         if self.dist_type == "dirichlet":
             q_scores_0 = q_scores_0.contiguous().view(-1, q_scores_0.size(2))
@@ -297,11 +313,16 @@ class NMTLossCompute(LossComputeBase):
 
             q_dist_0 = torch.distributions.normal.Normal(q_scores_0, q_scores_1)
             p_a_dist_0 = torch.distributions.normal.Normal(p_a_scores_0, p_a_scores_1)
-            q_dist = torch.distributions.Dirichlet(q_scores_2)
-            p_a_dist = torch.distributions.Dirichlet(p_a_scores_2)
+            q_dist = torch.distributions.Dirichlet(q_scores_2.cpu())
+            p_a_dist = torch.distributions.Dirichlet(p_a_scores_2.cpu())
 
             kl_0 = torch.distributions.kl.kl_divergence(q_dist_0, p_a_dist_0).sum()
-            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).sum()
+            kl = torch.distributions.kl.kl_divergence(q_dist, p_a_dist).cuda().sum()
+            m = torch.distributions.categorical.Categorical(q_dist.rsample().cuda())
+            ent = m.entropy().sum()
+
+            m = torch.distributions.categorical.Categorical(p_a_dist.rsample().cuda())
+            p_ent = m.entropy().sum()
             assert xent.size() == kl.size(), "xent.size():{}\nkl.size():{}\n".format(xent.size(), kl.size())
         elif self.dist_type == "none":
             # Minimize KL from sample, lol.
@@ -321,6 +342,7 @@ class NMTLossCompute(LossComputeBase):
         else:
             loss = xent + kl
 
+        loss = loss + ent * self.entropy
         #loss = kl
         if self.confidence < 1:
             # Default: report smoothed ppl.
@@ -329,7 +351,7 @@ class NMTLossCompute(LossComputeBase):
         else:
             loss_data = loss.data.clone()
 
-        stats = self._stats((xent+kl).data.clone(), xent.data.clone(), kl_0.data.clone(), kl.data.clone(), scores.data, target.view(-1).data)
+        stats = self._stats((xent+kl).data.clone(), xent.data.clone(), kl_0.data.clone(), kl.data.clone(), p_ent.data.clone(), scores.data, target.view(-1).data)
 
         return loss, stats
 

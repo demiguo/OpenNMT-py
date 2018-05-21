@@ -32,11 +32,12 @@ class Statistics(object):
     * perplexity
     * elapsed time
     """
-    def __init__(self, loss=0, xent=0, kl_0=0, kl=0, n_words=0, n_correct=0):
+    def __init__(self, loss=0, xent=0, kl_0=0, kl=0, ent=0, n_words=0, n_correct=0):
         self.loss = loss
         self._xent = xent
         self._kl_0 = kl_0
         self._kl = kl
+        self._ent = ent
         self.n_words = n_words
         self.n_correct = n_correct
         self.n_src_words = 0
@@ -47,6 +48,7 @@ class Statistics(object):
         self._xent += stat._xent
         self._kl_0 += stat._kl_0
         self._kl += stat._kl
+        self._ent += stat._ent
         self.n_words += stat.n_words
         self.n_correct += stat.n_correct
 
@@ -55,6 +57,9 @@ class Statistics(object):
 
     def xent(self):
         return self._xent / self.n_words
+
+    def ent(self):
+        return self._ent / self.n_words
 
     def ppl(self):
         return math.exp(min(self.loss / self.n_words, 100))
@@ -82,7 +87,7 @@ class Statistics(object):
         """
         t = self.elapsed_time()
         print(("Epoch %2d, %5d/%5d; acc: %6.2f; ppl: %6.2f; xent: %6.2f; " +
-            "pppl: %6.2f; kl: %6.4f; kl_dir: %6.4f" +
+            "pppl: %6.2f; kl: %6.4f; kl_dir: %6.4f; ent: %6.4f; " +
                "%3.0f src tok/s; %3.0f tgt tok/s; %6.0f s elapsed") %
               (epoch, batch, n_batches,
                self.accuracy(),
@@ -91,6 +96,7 @@ class Statistics(object):
                self.pppl(),
                self.kl_0(),
                self.kl(),
+               self.ent(),
                self.n_src_words / (t + 1e-5),
                self.n_words / (t + 1e-5),
                time.time() - start))
@@ -243,6 +249,7 @@ class Trainer(object):
 
         stats = Statistics()
 
+        i_huh = 0
         for batch in valid_iter:
             cur_dataset = valid_iter.get_cur_dataset()
             self.valid_loss.cur_dataset = cur_dataset
@@ -264,12 +271,21 @@ class Trainer(object):
             with torch.no_grad():
                 outputs, attns, _, dist_scores = self.model(src, tgt, src_lengths)
 
-            # Compute loss.
-            batch_stats = self.valid_loss.monolithic_compute_loss(
-                    batch, outputs, attns, dist_scores=dist_scores)
+                # Compute loss.
+                batch_stats = self.valid_loss.monolithic_compute_loss(
+                        batch, outputs, attns, dist_scores=dist_scores)
 
             # Update statistics.
             stats.update(batch_stats)
+
+            i_huh += 1
+            if self.model.n_samples > 1 and i_huh % 10 == 0:
+                print("Batch " + str(i_huh))
+                print('Validation perplexity: %g' % stats.ppl())
+                print('Validation pppl: %g' % stats.pppl())
+                print('Validation xent: %g' % stats.xent())
+                print('Validation kl: %g' % stats.kl())
+                print('Validation accuracy: %g' % stats.accuracy())
 
         # Set model back to training mode.
         self.model.train()

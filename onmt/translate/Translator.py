@@ -4,6 +4,9 @@ from torch.autograd import Variable
 import onmt.translate.Beam
 import onmt.io
 
+import math
+from onmt.Utils import logsumexp
+from copy import deepcopy
 
 class Translator(object):
     """
@@ -149,14 +152,38 @@ class Translator(object):
             inp = inp.unsqueeze(2)
 
             # Run one step.
-            dec_out, dec_states, attn = self.model.decoder(
-                inp, memory_bank, dec_states, memory_lengths=memory_lengths)
-            dec_out = dec_out.squeeze(0)
-            # dec_out: beam x rnn_size
+            #dec_out, dec_states, attn, p_a_scores, q_stats = self.model.decoder(
+                #inp, memory_bank, dec_states, memory_lengths=memory_lengths)
+            if self.model.n_samples == 1:
+                dec_out, dec_states, attn, p_a_scores, q_scores = \
+                    self.model.decoder(inp, memory_bank,
+                                 dec_states,
+                                 memory_lengths=memory_lengths,
+                                 q_scores_residual = None)
+                dec_out = dec_out.squeeze(0)
+                # dec_out: beam x rnn_size
+            else:
+                outputs = []
+                for _ in range(self.model.n_samples-1):
+                    decoder_outputs, _, attn, p_a_scores, q_scores = \
+                        self.model.decoder(inp, memory_bank,
+                                     deepcopy(dec_states),
+                                     memory_lengths=memory_lengths,
+                                     q_scores_residual = None)
+                    outputs += [decoder_outputs]
+                decoder_outputs, dec_state, attn, p_a_scores, q_scores = \
+                    self.model.decoder(inp, memory_bank,
+                                 dec_states,
+                                 memory_lengths=memory_lengths,
+                                 q_scores_residual = None)
+                outputs += [decoder_outputs]
+                dec_out = torch.stack(outputs, dim=0)
 
             # (b) Compute a vector of batch x beam word scores.
             if not self.copy_attn:
                 out = self.model.generator.forward(dec_out).data
+                if self.model.n_samples > 1:
+                    out = logsumexp(out, dim=0) - math.log(out.size(0))
                 out = unbottle(out)
                 # beam x tgt_vocab
                 beam_attn = unbottle(attn["std"])

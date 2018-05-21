@@ -14,6 +14,8 @@ import onmt
 from onmt.Utils import aeq, sequence_mask, logsumexp
 from onmt.Models import RNNEncoder, InputFeedRNNDecoder, NMTModel
 
+from copy import deepcopy
+
 class MuSigma(Function):
     # Note that both forward and backward are @staticmethods
     @staticmethod
@@ -251,6 +253,8 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
         attns["q_raw_std"] = []
         attns["p_raw_mean"] = []
         attns["p_raw_std"] = []
+        attns["p_mean_2"] = []
+        attns["q_mean_2"] = []
 
         emb = self.embeddings(tgt)
         assert emb.dim() == 3  # len x batch x embedding_dim
@@ -270,26 +274,33 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
         q_scores_std = []
         q_scores_alpha = []
         q_scores_sample = []
-        q_scores_residual = q_scores_residual.transpose(0,1)
+        q_scores_mean_2 = []
+        p_scores_mean_2 = []
+        if q_scores_residual is not None:
+            q_scores_residual = q_scores_residual.transpose(0,1)
         for i, emb_t in enumerate(emb.split(1)):
             emb_t = emb_t.squeeze(0)
             decoder_input = torch.cat([emb_t, input_feed], 1)
 
             rnn_output, hidden = self.rnn(decoder_input, hidden)
-            decoder_output, p_attn, raw_scores, (q_scores_mean_i, q_scores_std_i, q_scores_alpha_i, q_scores_sample_i), decoder_output_input_feed = self.attn(
+            decoder_output, p_attn, raw_scores, (q_scores_mean_i, q_scores_std_i, q_scores_alpha_i, q_scores_sample_i, q_scores_mean_2_i, p_scores_mean_2_i), decoder_output_input_feed = self.attn(
                 rnn_output,
                 memory_bank.transpose(0, 1),
                 memory_lengths=memory_lengths,
-                q_scores_residual=q_scores_residual[i])
+                q_scores_residual=q_scores_residual[i] if q_scores_residual is not None else None)
             q_scores_mean.append(q_scores_mean_i)
             q_scores_std.append(q_scores_std_i)
             q_scores_alpha.append(q_scores_alpha_i)
             q_scores_sample.append(q_scores_sample_i)
+            q_scores_mean_2.append(q_scores_mean_2_i)
+            p_scores_mean_2.append(p_scores_mean_2_i)
             attns["q"] += [q_scores_sample_i.view(-1, src_len)]
             attns["q_raw_mean"] += [q_scores_mean_i.view(-1, src_len)]
             attns["q_raw_std"] += [q_scores_std_i.view(-1, src_len)]
             attns["p_raw_mean"] += [raw_scores[0].view(-1, src_len)]
             attns["p_raw_std"] += [raw_scores[1].view(-1, src_len)]
+            attns["p_mean_2"] += [p_scores_mean_2_i.view(-1, src_len)]
+            attns["q_mean_2"] += [q_scores_mean_2_i.view(-1, src_len)]
 
             # raw_scores: [batch x tgt_len x src_len]
             #assert raw_scores.size() == (batch_size, 1, src_len)
@@ -325,7 +336,7 @@ class ViInputFeedRNNDecoder(InputFeedRNNDecoder):
         #    #    p_a_scores[3].data.masked_fill_(1-mask, -999)
         #    #else:
         #    #    assert (False)
-        print ('p max: %f, min: %f'%(p_a_scores[3].max(), p_a_scores[3].min()))
+        #print ('p max: %f, min: %f'%(p_a_scores[3].max(), p_a_scores[3].min()))
         return hidden, decoder_outputs, attns, p_a_scores, [q_scores_mean, q_scores_std, q_scores_alpha]
 
     def _build_rnn(self, rnn_type, input_size,
@@ -373,7 +384,9 @@ class ViNMTModel(nn.Module):
     @n_samples.setter  
     def n_samples(self, n):
         self._n_samples = n
-        self.decoder.attn.use_prior = n > 1
+        #self.decoder.attn.use_prior = n > 1
+        self.decoder.attn.use_prior = True
+        print("Setting use_prior to: {}".format(self.decoder.attn.use_prior))
 
     def forward(self, src, tgt, lengths, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
@@ -439,15 +452,25 @@ class ViNMTModel(nn.Module):
                              q_scores_residual = q_scores_residual)
         else:
             outputs = []
-            for _ in range(self.n_samples):
-                decoder_outputs, dec_state, attns, p_a_scores, q_scores = \
+            for _ in range(self.n_samples-1):
+                decoder_outputs, _, attns, p_a_scores, q_scores = \
                     self.decoder(tgt, memory_bank,
-                                 enc_state if dec_state is None
-                                 else dec_state,
+                                 deepcopy(enc_state) if dec_state is None
+                                 else deepcopy(dec_state),
                                  memory_lengths=lengths,
                                  q_scores_residual = q_scores_residual)
                 outputs += [decoder_outputs]
-            outputs = logsumexp(torch.stack(outputs, dim=0), dim=0) - math.log(self.n_samples)
+            #decoder_outputs = logsumexp(soutputs, dim=0) - math.log(self.n_samples)
+            #import pdb; pdb.set_trace()
+            # LOL
+            decoder_outputs, dec_state, attns, p_a_scores, q_scores = \
+                self.decoder(tgt, memory_bank,
+                             enc_state if dec_state is None
+                             else dec_state,
+                             memory_lengths=lengths,
+                             q_scores_residual = q_scores_residual)
+            outputs += [decoder_outputs]
+            decoder_outputs = torch.stack(outputs, dim=0)
 
         if self.multigpu:
             # Not yet supported on multi-gpu
